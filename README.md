@@ -56,6 +56,10 @@ cd ml-api
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
+## Demo Lokal
+
+Runbook demo lokal untuk MySQL/MariaDB, Flask ML API, Laravel API, akun demo, dan smoke test ada di `docs/demo_runbook_local.md`.
+
 ## Guardrail PRD
 
 - Flutter tidak memanggil Flask langsung.
