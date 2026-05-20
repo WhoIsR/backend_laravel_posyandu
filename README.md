@@ -31,12 +31,18 @@ ML_API_URL=http://127.0.0.1:5000
 ```powershell
 cd ml-api
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python app.py
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe app.py
 ```
 
 Model default adalah `ml-api/stunting_model.json`. File `.pkl` tetap disimpan sebagai fallback sesuai kebutuhan demo.
+
+Cek service ML setelah berjalan:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:5000/health
+```
 
 ## Test
 
@@ -47,7 +53,7 @@ php artisan test
 
 ```powershell
 cd ml-api
-python -m unittest discover -s tests
+.\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
 ## Guardrail PRD
