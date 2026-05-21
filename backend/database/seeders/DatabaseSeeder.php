@@ -24,9 +24,9 @@ class DatabaseSeeder extends Seeder
 
         $bidanIds = [];
         foreach ([
-            ['Bidan Desa Melati', '197801012006042001', 1],
-            ['Bidan Desa Anggrek', '197902022007042002', 2],
-            ['Bidan Desa Mawar', '198003032008042003', 3],
+            ['Bidan Ratna Wulandari', '197801012006042001', 1],
+            ['Bidan Rina Kurniasih', '197902022007042002', 2],
+            ['Bidan Maya Lestari', '198003032008042003', 3],
         ] as [$nama, $nik, $posyanduId]) {
             $bidanIds[$posyanduId] = User::query()->create([
                 'nama' => $nama,
@@ -40,10 +40,10 @@ class DatabaseSeeder extends Seeder
 
         $kaderIds = [];
         foreach ([
-            ['Kader Melati', '3271010101010001', 1],
-            ['Kader Sari', '3271010101010002', 1],
-            ['Kader Anggrek', '3271010101010003', 2],
-            ['Kader Mawar', '3271010101010004', 3],
+            ['Kader Sri Melati', '3271010101010001', 1],
+            ['Kader Dewi Sari', '3271010101010002', 1],
+            ['Kader Nur Anggraeni', '3271010101010003', 2],
+            ['Kader Lilis Mawarni', '3271010101010004', 3],
         ] as [$nama, $nik, $posyanduId]) {
             $kaderIds[$posyanduId][] = User::query()->create([
                 'nama' => $nama,
