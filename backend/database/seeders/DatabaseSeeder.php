@@ -118,7 +118,7 @@ class DatabaseSeeder extends Seeder
                 'jadwal_posyandu_id' => $jadwalId,
                 'posyandu_id' => $posyanduId,
                 'tanggal' => $date,
-                'status' => $i === 5 ? 'berjalan' : 'selesai',
+                'status' => $i >= 3 ? 'berjalan' : 'selesai',
                 'dibuka_oleh' => $kaderIds[$posyanduId][0],
                 'created_at' => now(),
                 'updated_at' => now(),
