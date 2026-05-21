@@ -377,8 +377,19 @@ class ApiController extends Controller
 
         $query = DB::table('rujukan')
             ->join('balita', 'balita.id', '=', 'rujukan.balita_id')
+            ->join('pengukuran', 'pengukuran.id', '=', 'rujukan.pengukuran_id')
             ->join('hasil_prediksi', 'hasil_prediksi.id', '=', 'rujukan.hasil_prediksi_id')
-            ->select('rujukan.*', 'balita.nama_balita', 'balita.nama_ibu', 'balita.posyandu_id', 'hasil_prediksi.risk_level')
+            ->select(
+                'rujukan.*',
+                'balita.nama_balita',
+                'balita.nama_ibu',
+                'balita.tanggal_lahir',
+                'balita.posyandu_id',
+                'pengukuran.berat_badan',
+                'pengukuran.tinggi_badan',
+                'pengukuran.tanggal_ukur',
+                'hasil_prediksi.risk_level'
+            )
             ->orderByRaw("case hasil_prediksi.risk_level when 'tinggi' then 1 when 'sedang' then 2 else 3 end")
             ->orderByDesc('rujukan.created_at');
 
@@ -407,7 +418,7 @@ class ApiController extends Controller
             ->join('pengukuran', 'pengukuran.id', '=', 'rujukan.pengukuran_id')
             ->join('hasil_prediksi', 'hasil_prediksi.id', '=', 'rujukan.hasil_prediksi_id')
             ->where('rujukan.id', $id)
-            ->select('rujukan.*', 'balita.nama_balita', 'balita.nama_ibu', 'pengukuran.berat_badan', 'pengukuran.tinggi_badan', 'hasil_prediksi.risk_level', 'hasil_prediksi.probability_json', 'hasil_prediksi.model_version')
+            ->select('rujukan.*', 'balita.nama_balita', 'balita.nama_ibu', 'balita.tanggal_lahir', 'pengukuran.berat_badan', 'pengukuran.tinggi_badan', 'pengukuran.tanggal_ukur', 'hasil_prediksi.risk_level', 'hasil_prediksi.probability_json', 'hasil_prediksi.model_version')
             ->first();
 
         abort_if(! $row, 404);

@@ -321,6 +321,14 @@ class PosyanduMvpTest extends TestCase
         $prediksiId = $this->seedPrediksi($pengukuranId, 'tinggi');
         $rujukanId = $this->seedRujukan($balitaId, $pengukuranId, $prediksiId);
 
+        $this->withToken($token)
+            ->getJson('/api/rujukan')
+            ->assertOk()
+            ->assertJsonPath('data.0.berat_badan', 11.4)
+            ->assertJsonPath('data.0.tinggi_badan', 87.5)
+            ->assertJsonPath('data.0.tanggal_ukur', now()->toDateString())
+            ->assertJsonPath('data.0.tanggal_lahir', DB::table('balita')->where('id', $balitaId)->value('tanggal_lahir'));
+
         $validation = $this->withToken($token)->postJson('/api/rujukan/'.$rujukanId.'/validasi', [
             'keputusan' => 'pmt',
             'catatan_bidan' => 'Berikan PMT dan pantau ulang bulan depan.',
