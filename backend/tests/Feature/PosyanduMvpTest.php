@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -172,6 +173,33 @@ class PosyanduMvpTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.nama_balita', 'Raka Pratama')
             ->assertJsonPath('meta.per_page', 10);
+
+        DB::table('sesi_posyandu')->insert([
+            'id' => 99,
+            'posyandu_id' => 1,
+            'tanggal' => now()->toDateString(),
+            'status' => 'berjalan',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('pengukuran')->insert([
+            'sesi_posyandu_id' => 99,
+            'balita_id' => $created->json('id'),
+            'kader_id' => $kader->id,
+            'tanggal_ukur' => now()->toDateString(),
+            'berat_badan' => 10.2,
+            'tinggi_badan' => 84.5,
+            'status_prediksi' => 'selesai',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->withToken($token)
+            ->getJson('/api/balita?search=Raka&per_page=10')
+            ->assertOk()
+            ->assertJsonPath('data.0.latest_weight', 10.2)
+            ->assertJsonPath('data.0.latest_height', 84.5)
+            ->assertJsonPath('data.0.latest_measured_at', now()->toDateString());
 
         $this->withToken($token)
             ->putJson('/api/balita/'.$created->json('id'), [

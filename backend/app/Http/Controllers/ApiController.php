@@ -162,19 +162,26 @@ class ApiController extends Controller
     public function listBalita(Request $request): JsonResponse
     {
         $perPage = $this->perPage($request);
-        $query = DB::table('balita')->orderBy('nama_balita');
+        $latestPengukuran = DB::table('pengukuran as latest')
+            ->select('latest.balita_id', 'latest.berat_badan', 'latest.tinggi_badan', 'latest.tanggal_ukur')
+            ->whereRaw('latest.id = (select p2.id from pengukuran p2 where p2.balita_id = latest.balita_id order by p2.tanggal_ukur desc, p2.id desc limit 1)');
+
+        $query = DB::table('balita')
+            ->leftJoinSub($latestPengukuran, 'latest_pengukuran', 'latest_pengukuran.balita_id', '=', 'balita.id')
+            ->select('balita.*', 'latest_pengukuran.berat_badan as latest_weight', 'latest_pengukuran.tinggi_badan as latest_height', 'latest_pengukuran.tanggal_ukur as latest_measured_at')
+            ->orderBy('balita.nama_balita');
 
         if ($request->user()->role === 'kader') {
-            $query->where('posyandu_id', $request->user()->posyandu_id);
+            $query->where('balita.posyandu_id', $request->user()->posyandu_id);
         } elseif ($request->filled('posyandu_id')) {
-            $query->where('posyandu_id', $request->integer('posyandu_id'));
+            $query->where('balita.posyandu_id', $request->integer('posyandu_id'));
         }
 
         if ($search = $request->string('search')->trim()->toString()) {
             $query->where(function ($q) use ($search) {
-                $q->where('nama_balita', 'like', "%{$search}%")
-                    ->orWhere('nama_ibu', 'like', "%{$search}%")
-                    ->orWhere('nik_balita', 'like', "%{$search}%");
+                $q->where('balita.nama_balita', 'like', "%{$search}%")
+                    ->orWhere('balita.nama_ibu', 'like', "%{$search}%")
+                    ->orWhere('balita.nik_balita', 'like', "%{$search}%");
             });
         }
 
