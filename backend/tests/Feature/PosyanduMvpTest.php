@@ -351,7 +351,16 @@ class PosyanduMvpTest extends TestCase
     public function test_bidan_can_download_three_required_pdf_reports(): void
     {
         $bidan = $this->createUser('Bidan Desa', '197801012006042001', 'bidan', 1);
+        $admin = User::query()->create([
+            'nama' => 'Admin Posyandu',
+            'nik_nip' => '199001012020011001',
+            'password' => Hash::make('password'),
+            'role' => 'admin',
+            'posyandu_id' => null,
+            'status' => 'aktif',
+        ]);
         $token = $bidan->createToken('test')->plainTextToken;
+        $adminToken = $admin->createToken('test-admin')->plainTextToken;
         $this->seedPosyandu($bidan->id);
         $balitaId = $this->seedBalita();
         $pengukuranId = $this->seedPengukuran($bidan->id, $balitaId);
@@ -394,6 +403,11 @@ class PosyanduMvpTest extends TestCase
                 ->assertHeader('content-type', 'application/pdf')
                 ->assertHeader('content-disposition');
         }
+
+        $this->withToken($adminToken)
+            ->get('/api/laporan/prediksi?start_date=2026-05-01&end_date=2026-05-31')
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
     }
 
     public function test_demo_seeder_creates_realistic_large_dataset(): void

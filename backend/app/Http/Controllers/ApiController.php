@@ -554,7 +554,7 @@ class ApiController extends Controller
 
     public function report(Request $request, string $type)
     {
-        if ($forbidden = $this->requireBidan($request)) {
+        if ($forbidden = $this->requireBidanOrAdmin($request)) {
             return $forbidden;
         }
 
@@ -735,6 +735,13 @@ class ApiController extends Controller
     private function requireBidan(Request $request): ?JsonResponse
     {
         return $request->user()->role === 'bidan'
+            ? null
+            : response()->json(['message' => 'Akses ditolak.'], 403);
+    }
+
+    private function requireBidanOrAdmin(Request $request): ?JsonResponse
+    {
+        return in_array($request->user()->role, ['bidan', 'admin'], true)
             ? null
             : response()->json(['message' => 'Akses ditolak.'], 403);
     }
