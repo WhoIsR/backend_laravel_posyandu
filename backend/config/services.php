@@ -40,4 +40,10 @@ return [
         'timeout' => env('ML_API_TIMEOUT', 5),
     ],
 
+    'fcm' => [
+        'server_key' => env('FCM_SERVER_KEY'),
+        'endpoint' => env('FCM_ENDPOINT', 'https://fcm.googleapis.com/fcm/send'),
+        'timeout' => env('FCM_TIMEOUT', 5),
+    ],
+
 ];

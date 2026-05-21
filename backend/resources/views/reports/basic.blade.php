@@ -17,15 +17,23 @@
     <table>
         <thead>
             <tr>
-                <th>Kolom</th>
-                <th>Keterangan</th>
+                @foreach ($columns as $column)
+                    <th>{{ $column }}</th>
+                @endforeach
             </tr>
         </thead>
         <tbody>
-            <tr>
-                <td>Status</td>
-                <td>Laporan dibuat dari endpoint MVP sesuai PRD.</td>
-            </tr>
+            @forelse ($rows as $row)
+                <tr>
+                    @foreach ($row as $value)
+                        <td>{{ $value }}</td>
+                    @endforeach
+                </tr>
+            @empty
+                <tr>
+                    <td colspan="{{ count($columns) }}">Belum ada data pada periode ini.</td>
+                </tr>
+            @endforelse
         </tbody>
     </table>
 </body>

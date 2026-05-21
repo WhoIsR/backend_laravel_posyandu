@@ -50,6 +50,112 @@ class ApiController extends Controller
         return response()->json($this->publicUser($request->user()));
     }
 
+    public function adminListUsers(Request $request): JsonResponse
+    {
+        if ($forbidden = $this->requireAdmin($request)) {
+            return $forbidden;
+        }
+
+        $rows = User::query()
+            ->select(['id', 'nama', 'nik_nip', 'role', 'posyandu_id', 'status', 'created_at', 'updated_at'])
+            ->whereIn('role', ['admin', 'bidan', 'kader'])
+            ->orderBy('role')
+            ->orderBy('nama')
+            ->paginate($this->perPage($request));
+
+        return response()->json($this->paginated($rows));
+    }
+
+    public function adminStoreUser(Request $request): JsonResponse
+    {
+        if ($forbidden = $this->requireAdmin($request)) {
+            return $forbidden;
+        }
+
+        $data = $request->validate([
+            'nama' => ['required', 'string'],
+            'nik_nip' => ['required', 'string', 'unique:users,nik_nip'],
+            'password' => ['required', 'string', 'min:6'],
+            'role' => ['required', 'in:bidan,kader'],
+            'posyandu_id' => ['nullable', 'exists:posyandu,id'],
+            'status' => ['required', 'in:aktif,nonaktif'],
+        ]);
+
+        $user = User::query()->create([
+            'nama' => $data['nama'],
+            'nik_nip' => $data['nik_nip'],
+            'password' => Hash::make($data['password']),
+            'role' => $data['role'],
+            'posyandu_id' => $data['posyandu_id'] ?? null,
+            'status' => $data['status'],
+        ]);
+
+        return response()->json($this->publicUser($user), 201);
+    }
+
+    public function adminUpdateUser(Request $request, int $id): JsonResponse
+    {
+        if ($forbidden = $this->requireAdmin($request)) {
+            return $forbidden;
+        }
+
+        $data = $request->validate([
+            'nama' => ['required', 'string'],
+            'role' => ['required', 'in:bidan,kader'],
+            'posyandu_id' => ['nullable', 'exists:posyandu,id'],
+            'status' => ['required', 'in:aktif,nonaktif'],
+            'password' => ['nullable', 'string', 'min:6'],
+        ]);
+
+        $update = [
+            'nama' => $data['nama'],
+            'role' => $data['role'],
+            'posyandu_id' => $data['posyandu_id'] ?? null,
+            'status' => $data['status'],
+        ];
+        if (! empty($data['password'])) {
+            $update['password'] = Hash::make($data['password']);
+        }
+
+        User::query()->whereKey($id)->whereIn('role', ['bidan', 'kader'])->update($update);
+
+        return response()->json($this->publicUser(User::query()->findOrFail($id)));
+    }
+
+    public function adminListPosyandu(Request $request): JsonResponse
+    {
+        if ($forbidden = $this->requireAdmin($request)) {
+            return $forbidden;
+        }
+
+        return response()->json($this->paginated(
+            DB::table('posyandu')->orderBy('nama_posyandu')->paginate($this->perPage($request))
+        ));
+    }
+
+    public function adminStorePosyandu(Request $request): JsonResponse
+    {
+        if ($forbidden = $this->requireAdmin($request)) {
+            return $forbidden;
+        }
+
+        $data = $this->posyanduPayload($request);
+        $id = DB::table('posyandu')->insertGetId($this->withTimestamps($data));
+
+        return response()->json($this->row('posyandu', $id), 201);
+    }
+
+    public function adminUpdatePosyandu(Request $request, int $id): JsonResponse
+    {
+        if ($forbidden = $this->requireAdmin($request)) {
+            return $forbidden;
+        }
+
+        DB::table('posyandu')->where('id', $id)->update($this->touch($this->posyanduPayload($request)));
+
+        return response()->json($this->rowOrFail('posyandu', $id));
+    }
+
     public function listBalita(Request $request): JsonResponse
     {
         $perPage = $this->perPage($request);
@@ -423,16 +529,19 @@ class ApiController extends Controller
 
     public function listNotifikasi(Request $request): JsonResponse
     {
-        return response()->json($this->paginated(
-            DB::table('notifikasi')->where('user_id', $request->user()->id)->orderByDesc('created_at')->paginate($this->perPage($request))
-        ));
+        $rows = DB::table('notifikasi')
+            ->where('user_id', $request->user()->id)
+            ->orderByDesc('created_at')
+            ->paginate($this->perPage($request));
+
+        return response()->json($this->paginated($rows, fn ($row) => $this->notificationPayload($row)));
     }
 
     public function readNotifikasi(Request $request, int $id): JsonResponse
     {
         DB::table('notifikasi')->where('id', $id)->where('user_id', $request->user()->id)->update($this->touch(['is_read' => true]));
 
-        return response()->json($this->rowOrFail('notifikasi', $id));
+        return response()->json($this->notificationPayload($this->rowOrFail('notifikasi', $id)));
     }
 
     public function updateFcmToken(Request $request): JsonResponse
@@ -466,13 +575,79 @@ class ApiController extends Controller
             'distribusi-pmt' => 'Laporan Distribusi PMT',
         ];
 
+        [$columns, $rows] = $this->reportData($type, $request->query('start_date'), $request->query('end_date'));
+        $filename = 'laporan-'.$type.'-'.now()->format('YmdHis').'.pdf';
         $pdf = Pdf::loadHTML(view('reports.basic', [
             'title' => $titles[$type],
             'start' => $request->query('start_date', '-'),
             'end' => $request->query('end_date', '-'),
+            'columns' => $columns,
+            'rows' => $rows,
         ])->render());
 
-        return response($pdf->output(), 200)->header('Content-Type', 'application/pdf');
+        return response($pdf->output(), 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'inline; filename="'.$filename.'"');
+    }
+
+    private function reportData(string $type, ?string $start, ?string $end): array
+    {
+        $startDate = $start ?: '1900-01-01';
+        $endDate = $end ?: now()->toDateString();
+
+        if ($type === 'prediksi') {
+            $rows = DB::table('hasil_prediksi')
+                ->join('pengukuran', 'pengukuran.id', '=', 'hasil_prediksi.pengukuran_id')
+                ->join('balita', 'balita.id', '=', 'pengukuran.balita_id')
+                ->whereBetween('pengukuran.tanggal_ukur', [$startDate, $endDate])
+                ->orderByDesc('pengukuran.tanggal_ukur')
+                ->limit(200)
+                ->get(['pengukuran.tanggal_ukur', 'balita.nama_balita', 'balita.nama_ibu', 'hasil_prediksi.risk_level', 'hasil_prediksi.risk_score'])
+                ->map(fn ($row) => [
+                    $row->tanggal_ukur,
+                    $row->nama_balita,
+                    $row->nama_ibu,
+                    $this->riskText($row->risk_level),
+                    $row->risk_score ?? '-',
+                ])->all();
+
+            return [['Tanggal', 'Balita', 'Ibu', 'Status Skrining', 'Skor'], $rows];
+        }
+
+        if ($type === 'kehadiran') {
+            $rows = DB::table('pengukuran')
+                ->join('sesi_posyandu', 'sesi_posyandu.id', '=', 'pengukuran.sesi_posyandu_id')
+                ->join('balita', 'balita.id', '=', 'pengukuran.balita_id')
+                ->whereBetween('pengukuran.tanggal_ukur', [$startDate, $endDate])
+                ->orderByDesc('pengukuran.tanggal_ukur')
+                ->limit(200)
+                ->get(['sesi_posyandu.tanggal', 'balita.nama_balita', 'balita.nama_ibu', 'pengukuran.berat_badan', 'pengukuran.tinggi_badan'])
+                ->map(fn ($row) => [
+                    $row->tanggal,
+                    $row->nama_balita,
+                    $row->nama_ibu,
+                    $row->berat_badan.' kg',
+                    $row->tinggi_badan.' cm',
+                ])->all();
+
+            return [['Tanggal', 'Balita', 'Ibu', 'BB', 'TB'], $rows];
+        }
+
+        $rows = DB::table('distribusi_pmt')
+            ->join('balita', 'balita.id', '=', 'distribusi_pmt.balita_id')
+            ->join('katalog_pmt', 'katalog_pmt.id', '=', 'distribusi_pmt.pmt_id')
+            ->whereBetween('distribusi_pmt.tanggal_distribusi', [$startDate, $endDate])
+            ->orderByDesc('distribusi_pmt.tanggal_distribusi')
+            ->limit(200)
+            ->get(['distribusi_pmt.tanggal_distribusi', 'balita.nama_balita', 'katalog_pmt.nama_barang', 'distribusi_pmt.jumlah', 'katalog_pmt.satuan'])
+            ->map(fn ($row) => [
+                $row->tanggal_distribusi,
+                $row->nama_balita,
+                $row->nama_barang,
+                $row->jumlah.' '.$row->satuan,
+            ])->all();
+
+        return [['Tanggal', 'Balita', 'PMT', 'Jumlah'], $rows];
     }
 
     private function processPrediction(int $pengukuranId): void
@@ -564,6 +739,13 @@ class ApiController extends Controller
             : response()->json(['message' => 'Akses ditolak.'], 403);
     }
 
+    private function requireAdmin(Request $request): ?JsonResponse
+    {
+        return $request->user()->role === 'admin'
+            ? null
+            : response()->json(['message' => 'Akses ditolak.'], 403);
+    }
+
     private function publicUser(User $user): array
     {
         return [
@@ -606,10 +788,10 @@ class ApiController extends Controller
         return in_array($perPage, [10, 25, 50, 100], true) ? $perPage : 10;
     }
 
-    private function paginated($paginator): array
+    private function paginated($paginator, ?callable $mapper = null): array
     {
         return [
-            'data' => $paginator->items(),
+            'data' => $mapper ? array_map($mapper, $paginator->items()) : $paginator->items(),
             'meta' => [
                 'current_page' => $paginator->currentPage(),
                 'per_page' => $paginator->perPage(),
@@ -638,6 +820,41 @@ class ApiController extends Controller
         };
     }
 
+    private function riskText(?string $risk): string
+    {
+        return match ($risk) {
+            'sedang' => 'Perlu perhatian',
+            'tinggi' => 'Perlu ditinjau bidan',
+            default => 'Risiko rendah',
+        };
+    }
+
+    private function posyanduPayload(Request $request): array
+    {
+        return $request->validate([
+            'nama_posyandu' => ['required', 'string'],
+            'alamat' => ['nullable', 'string'],
+            'desa' => ['nullable', 'string'],
+            'kecamatan' => ['nullable', 'string'],
+            'bidan_id' => ['nullable', 'exists:users,id'],
+        ]);
+    }
+
+    private function notificationPayload(object $row): array
+    {
+        return [
+            'id' => $row->id,
+            'user_id' => $row->user_id,
+            'judul' => $row->judul,
+            'pesan' => $row->pesan,
+            'tipe' => $row->tipe,
+            'data' => json_decode($row->data_json ?? '{}', true) ?: [],
+            'is_read' => (bool) $row->is_read,
+            'created_at' => $row->created_at,
+            'updated_at' => $row->updated_at,
+        ];
+    }
+
     private function notify(int $userId, string $judul, string $pesan, string $tipe, array $data = []): void
     {
         DB::table('notifikasi')->insert($this->withTimestamps([
@@ -648,5 +865,37 @@ class ApiController extends Controller
             'data_json' => json_encode($data),
             'is_read' => false,
         ]));
+
+        $this->sendFcmNotification($userId, $judul, $pesan, $tipe, $data);
+    }
+
+    private function sendFcmNotification(int $userId, string $judul, string $pesan, string $tipe, array $data): void
+    {
+        $serverKey = config('services.fcm.server_key');
+        if (! $serverKey) {
+            return;
+        }
+
+        $token = User::query()->whereKey($userId)->value('fcm_token');
+        if (! $token) {
+            return;
+        }
+
+        try {
+            Http::timeout((int) config('services.fcm.timeout'))
+                ->withHeaders(['Authorization' => 'key='.$serverKey])
+                ->post(config('services.fcm.endpoint'), [
+                    'to' => $token,
+                    'notification' => [
+                        'title' => $judul,
+                        'body' => $pesan,
+                    ],
+                    'data' => $data + [
+                        'tipe' => $tipe,
+                    ],
+                ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 }

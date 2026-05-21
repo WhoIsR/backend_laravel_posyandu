@@ -16,6 +16,14 @@ class PosyanduMvpTest extends TestCase
     {
         $this->createUser('Kader Melati', '3271010101010001', 'kader', 1);
         $this->createUser('Bidan Desa', '197801012006042001', 'bidan', 1);
+        User::query()->create([
+            'nama' => 'Admin Posyandu',
+            'nik_nip' => '199001012020011001',
+            'password' => Hash::make('password'),
+            'role' => 'admin',
+            'posyandu_id' => null,
+            'status' => 'aktif',
+        ]);
 
         $kaderLogin = $this->postJson('/api/login', [
             'nik_nip' => '3271010101010001',
@@ -36,6 +44,72 @@ class PosyanduMvpTest extends TestCase
             'nik_nip' => '3271010101010001',
             'password' => 'salah',
         ])->assertUnauthorized();
+
+        $this->postJson('/api/login', [
+            'nik_nip' => '199001012020011001',
+            'password' => 'password',
+        ])->assertOk()
+          ->assertJsonPath('user.role', 'admin');
+    }
+
+    public function test_admin_can_manage_users_and_posyandu_but_other_roles_cannot(): void
+    {
+        $admin = User::query()->create([
+            'nama' => 'Admin Posyandu',
+            'nik_nip' => '199001012020011001',
+            'password' => Hash::make('password'),
+            'role' => 'admin',
+            'posyandu_id' => null,
+            'status' => 'aktif',
+        ]);
+        $kader = $this->createUser('Kader Melati', '3271010101010001', 'kader', 1);
+        $adminToken = $admin->createToken('test')->plainTextToken;
+        $kaderToken = $kader->createToken('test')->plainTextToken;
+
+        $posyandu = $this->withToken($adminToken)->postJson('/api/admin/posyandu', [
+            'nama_posyandu' => 'Posyandu Anggrek 01',
+            'alamat' => 'Balai RW 01',
+            'desa' => 'Anggrek',
+            'kecamatan' => 'Sukamaju',
+            'bidan_id' => null,
+        ]);
+
+        $posyandu->assertCreated()
+            ->assertJsonPath('nama_posyandu', 'Posyandu Anggrek 01');
+
+        $createdUser = $this->withToken($adminToken)->postJson('/api/admin/users', [
+            'nama' => 'Bidan Anggrek',
+            'nik_nip' => '198812122012042002',
+            'password' => 'password',
+            'role' => 'bidan',
+            'posyandu_id' => $posyandu->json('id'),
+            'status' => 'aktif',
+        ]);
+
+        $createdUser->assertCreated()
+            ->assertJsonPath('role', 'bidan')
+            ->assertJsonMissing(['password']);
+
+        $this->withToken($adminToken)->putJson('/api/admin/users/'.$createdUser->json('id'), [
+            'nama' => 'Bidan Anggrek',
+            'role' => 'bidan',
+            'posyandu_id' => $posyandu->json('id'),
+            'status' => 'nonaktif',
+        ])->assertOk()
+          ->assertJsonPath('status', 'nonaktif');
+
+        $this->assertNotSame($adminToken, $kaderToken);
+    }
+
+    public function test_non_admin_cannot_access_admin_endpoints(): void
+    {
+        $kader = $this->createUser('Kader Melati', '3271010101010001', 'kader', 1);
+        $token = $kader->createToken('test')->plainTextToken;
+
+        $this->withToken($token)->getJson('/api/admin/users')->assertForbidden();
+        $this->withToken($token)->postJson('/api/admin/posyandu', [
+            'nama_posyandu' => 'Tidak Boleh',
+        ])->assertForbidden();
     }
 
     public function test_kader_cannot_access_bidan_only_pmt_report_and_validation_endpoints(): void
@@ -238,19 +312,101 @@ class PosyanduMvpTest extends TestCase
             'user_id' => $kader->id,
             'tipe' => 'pmt_disetujui',
         ]);
+
+    }
+
+    public function test_notifications_expose_route_payload_and_can_be_marked_read(): void
+    {
+        $kader = $this->createUser('Kader Melati', '3271010101010001', 'kader', 1);
+        \DB::table('notifikasi')->insert([
+            'user_id' => $kader->id,
+            'judul' => 'PMT disetujui',
+            'pesan' => 'PMT untuk balita sudah disetujui bidan.',
+            'tipe' => 'pmt_disetujui',
+            'data_json' => json_encode(['distribusi_pmt_id' => 7]),
+            'is_read' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $readToken = $kader->createToken('read')->plainTextToken;
+        $notifications = $this->getJson('/api/notifikasi', [
+                'Authorization' => 'Bearer '.$readToken,
+            ])
+            ->assertOk();
+
+        $notifications
+            ->assertJsonPath('data.0.tipe', 'pmt_disetujui')
+            ->assertJsonPath('data.0.is_read', false)
+            ->assertJsonPath('data.0.data.distribusi_pmt_id', 7);
+
+        $readToken2 = $kader->createToken('read-2')->plainTextToken;
+        $this->postJson('/api/notifikasi/'.$notifications->json('data.0.id').'/read', [], [
+                'Authorization' => 'Bearer '.$readToken2,
+            ])
+            ->assertOk()
+            ->assertJsonPath('is_read', true);
     }
 
     public function test_bidan_can_download_three_required_pdf_reports(): void
     {
         $bidan = $this->createUser('Bidan Desa', '197801012006042001', 'bidan', 1);
         $token = $bidan->createToken('test')->plainTextToken;
+        $this->seedPosyandu($bidan->id);
+        $balitaId = $this->seedBalita();
+        $pengukuranId = $this->seedPengukuran($bidan->id, $balitaId);
+        $prediksiId = $this->seedPrediksi($pengukuranId, 'tinggi');
+        $rujukanId = $this->seedRujukan($balitaId, $pengukuranId, $prediksiId);
+        $validationId = \DB::table('validasi_medis')->insertGetId([
+            'rujukan_id' => $rujukanId,
+            'bidan_id' => $bidan->id,
+            'keputusan' => 'pmt',
+            'catatan_bidan' => 'Berikan PMT.',
+            'tanggal_validasi' => now()->toDateString(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $pmtId = \DB::table('katalog_pmt')->insertGetId([
+            'nama_barang' => 'Biskuit Balita',
+            'jenis_barang' => 'makanan',
+            'satuan' => 'paket',
+            'stok_saat_ini' => 10,
+            'stok_minimum' => 3,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        \DB::table('distribusi_pmt')->insert([
+            'validasi_medis_id' => $validationId,
+            'balita_id' => $balitaId,
+            'pmt_id' => $pmtId,
+            'bidan_id' => $bidan->id,
+            'jumlah' => 1,
+            'tanggal_distribusi' => now()->toDateString(),
+            'keterangan' => 'Demo laporan.',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         foreach (['prediksi', 'kehadiran', 'distribusi-pmt'] as $report) {
             $this->withToken($token)
                 ->get('/api/laporan/'.$report.'?start_date=2026-05-01&end_date=2026-05-31')
                 ->assertOk()
-                ->assertHeader('content-type', 'application/pdf');
+                ->assertHeader('content-type', 'application/pdf')
+                ->assertHeader('content-disposition');
         }
+    }
+
+    public function test_demo_seeder_creates_realistic_large_dataset(): void
+    {
+        $this->artisan('db:seed')->assertSuccessful();
+
+        $this->assertDatabaseHas('users', ['role' => 'admin']);
+        $this->assertGreaterThanOrEqual(100, \DB::table('balita')->count());
+        $this->assertGreaterThanOrEqual(6, \DB::table('sesi_posyandu')->count());
+        $this->assertGreaterThanOrEqual(40, \DB::table('pengukuran')->count());
+        $this->assertGreaterThanOrEqual(10, \DB::table('rujukan')->count());
+        $this->assertGreaterThanOrEqual(3, \DB::table('katalog_pmt')->count());
+        $this->assertGreaterThanOrEqual(10, \DB::table('notifikasi')->count());
     }
 
     private function createUser(string $nama, string $nikNip, string $role, int $posyanduId): User

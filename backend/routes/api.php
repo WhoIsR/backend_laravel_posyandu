@@ -10,6 +10,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [ApiController::class, 'logout']);
     Route::get('/me', [ApiController::class, 'me']);
 
+    Route::get('/admin/users', [ApiController::class, 'adminListUsers']);
+    Route::post('/admin/users', [ApiController::class, 'adminStoreUser']);
+    Route::put('/admin/users/{id}', [ApiController::class, 'adminUpdateUser']);
+    Route::get('/admin/posyandu', [ApiController::class, 'adminListPosyandu']);
+    Route::post('/admin/posyandu', [ApiController::class, 'adminStorePosyandu']);
+    Route::put('/admin/posyandu/{id}', [ApiController::class, 'adminUpdatePosyandu']);
+
     Route::get('/balita', [ApiController::class, 'listBalita']);
     Route::post('/balita', [ApiController::class, 'storeBalita']);
     Route::get('/balita/{id}', [ApiController::class, 'showBalita']);
