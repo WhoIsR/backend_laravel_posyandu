@@ -101,6 +101,24 @@ class PosyanduMvpTest extends TestCase
         $this->assertNotSame($adminToken, $kaderToken);
     }
 
+    public function test_nonaktif_user_cannot_login(): void
+    {
+        User::query()->create([
+            'nama' => 'Kader Nonaktif',
+            'nik_nip' => '3271010101010099',
+            'password' => Hash::make('password'),
+            'role' => 'kader',
+            'posyandu_id' => 1,
+            'status' => 'nonaktif',
+        ]);
+
+        $this->postJson('/api/login', [
+            'nik_nip' => '3271010101010099',
+            'password' => 'password',
+        ])->assertForbidden()
+          ->assertJsonPath('message', 'Akun ini sedang nonaktif. Hubungi admin Posyandu.');
+    }
+
     public function test_non_admin_cannot_access_admin_endpoints(): void
     {
         $kader = $this->createUser('Kader Melati', '3271010101010001', 'kader', 1);

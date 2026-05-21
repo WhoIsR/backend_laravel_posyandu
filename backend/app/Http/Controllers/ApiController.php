@@ -25,11 +25,14 @@ class ApiController extends Controller
 
         $user = User::query()
             ->where('nik_nip', $data['nik_nip'])
-            ->where('status', 'aktif')
             ->first();
 
         if (! $user || ! Hash::check($data['password'], $user->password)) {
             return response()->json(['message' => 'NIK/NIP atau password belum sesuai.'], 401);
+        }
+
+        if ($user->status !== 'aktif') {
+            return response()->json(['message' => 'Akun ini sedang nonaktif. Hubungi admin Posyandu.'], 403);
         }
 
         return response()->json([
