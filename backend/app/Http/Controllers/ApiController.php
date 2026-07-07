@@ -807,7 +807,7 @@ class ApiController extends Controller
             'Tinggi Badan (cm)' => (float) $pengukuran->tinggi_badan,
             'Kelompok Usia' => $this->kelompokUsia($umurBulan),
             'TB per Bulan' => round(((float) $pengukuran->tinggi_badan) / ($umurBulan + 1), 4),
-            'Penghasilan' => (int) $balita->penghasilan,
+            'Penghasilan' => $this->kategoriPenghasilan((int) $balita->penghasilan),
             'Jumlah Keluarga' => (int) $balita->jumlah_keluarga,
         ];
 
@@ -1060,10 +1060,23 @@ class ApiController extends Controller
     private function kelompokUsia(int $umurBulan): int
     {
         return match (true) {
+            $umurBulan <= 5 => 0,
             $umurBulan <= 11 => 1,
             $umurBulan <= 23 => 2,
             $umurBulan <= 35 => 3,
             default => 4,
+        };
+    }
+
+    private function kategoriPenghasilan(int $penghasilan): int
+    {
+        // ponytail: keep the training-time 1/2/3 scale; update if the model metadata changes.
+        $umkTangerang = 5210377;
+
+        return match (true) {
+            $penghasilan < $umkTangerang => 1,
+            $penghasilan === $umkTangerang => 2,
+            default => 3,
         };
     }
 
@@ -1127,8 +1140,9 @@ class ApiController extends Controller
 
     private function sendFcmNotification(int $userId, string $judul, string $pesan, string $tipe, array $data): void
     {
+        $path = (string) config('services.fcm.service_account');
         $token = User::query()->whereKey($userId)->value('fcm_token');
-        if (! $token || !file_exists(base_path('firebase-service-account.json'))) {
+        if (! $token || ! file_exists($path)) {
             return;
         }
 
@@ -1138,7 +1152,7 @@ class ApiController extends Controller
                 return;
             }
 
-            $json = json_decode(file_get_contents(base_path('firebase-service-account.json')), true);
+            $json = json_decode(file_get_contents($path), true);
             $projectId = $json['project_id'];
 
             // Note: FCM v1 API requires values in 'data' to be strings.
@@ -1165,8 +1179,8 @@ class ApiController extends Controller
 
     private function getGoogleAccessToken(): ?string
     {
-        $path = base_path('firebase-service-account.json');
-        if (!file_exists($path)) {
+        $path = (string) config('services.fcm.service_account');
+        if (! file_exists($path)) {
             return null;
         }
 

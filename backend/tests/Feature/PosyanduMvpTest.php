@@ -276,7 +276,9 @@ class PosyanduMvpTest extends TestCase
                 'TB per Bulan',
                 'Penghasilan',
                 'Jumlah Keluarga',
-            ]);
+            ]
+            && $request['features']['Kelompok Usia'] === 3
+            && $request['features']['Penghasilan'] === 1);
     }
 
     public function test_worsening_measurement_history_escalates_overall_screening_risk(): void

@@ -4,7 +4,11 @@ import pickle
 from pathlib import Path
 
 from flask import Flask, jsonify, request
-import xgboost as xgb
+
+try:
+    import xgboost as xgb
+except ImportError:
+    xgb = None
 
 
 DEFAULT_FEATURES = [
@@ -62,10 +66,15 @@ def create_app(config=None):
             }), 422
 
         try:
-            row = [[float(features[name]) for name in FEATURES]]
+            clean = {name: float(features[name]) for name in FEATURES}
         except (TypeError, ValueError):
             return jsonify({"message": "Semua fitur harus berupa angka."}), 422
 
+        errors = validate_features(clean)
+        if errors:
+            return jsonify({"message": "Nilai fitur belum valid.", "errors": errors}), 422
+
+        row = [[clean[name] for name in FEATURES]]
         predicted_class = int(app.model.predict(row)[0])
         probabilities = probabilities_for(app.model, row, predicted_class)
 
@@ -79,12 +88,33 @@ def create_app(config=None):
     return app
 
 
+def validate_features(features):
+    errors = {}
+    if not 0 <= features["Umur (bulan)"] <= 60:
+        errors["Umur (bulan)"] = "Harus berada pada rentang 0-60 bulan."
+    if features["Jenis Kelamin Encoded"] not in (0.0, 1.0):
+        errors["Jenis Kelamin Encoded"] = "Harus 0 atau 1."
+    if not 40 <= features["Tinggi Badan (cm)"] <= 130:
+        errors["Tinggi Badan (cm)"] = "Harus berada pada rentang 40-130 cm."
+    if features["Kelompok Usia"] not in (0.0, 1.0, 2.0, 3.0, 4.0):
+        errors["Kelompok Usia"] = "Harus berada pada rentang 0-4."
+    if features["TB per Bulan"] <= 0:
+        errors["TB per Bulan"] = "Harus lebih dari 0."
+    if features["Penghasilan"] not in (1.0, 2.0, 3.0):
+        errors["Penghasilan"] = "Harus 1, 2, atau 3 sesuai kategori training."
+    if not 1 <= features["Jumlah Keluarga"] <= 20:
+        errors["Jumlah Keluarga"] = "Harus berada pada rentang 1-20."
+    return errors
+
+
 def load_model(path):
     model_path = Path(path)
     if not model_path.exists():
         raise FileNotFoundError(f"Model file not found: {model_path}")
 
     if model_path.suffix.lower() == ".json":
+        if xgb is None:
+            raise RuntimeError("xgboost is required to load JSON model files.")
         model = xgb.XGBClassifier()
         model.load_model(model_path)
         return model

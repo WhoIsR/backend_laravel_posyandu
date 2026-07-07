@@ -41,8 +41,7 @@ return [
     ],
 
     'fcm' => [
-        'server_key' => env('FCM_SERVER_KEY'),
-        'endpoint' => env('FCM_ENDPOINT', 'https://fcm.googleapis.com/fcm/send'),
+        'service_account' => env('FCM_SERVICE_ACCOUNT', base_path('firebase-service-account.json')),
         'timeout' => env('FCM_TIMEOUT', 5),
     ],
 

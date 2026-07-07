@@ -42,7 +42,7 @@ class MlApiTest(unittest.TestCase):
                 "Tinggi Badan (cm)": 87.5,
                 "Kelompok Usia": 3,
                 "TB per Bulan": 2.73,
-                "Penghasilan": 2500000,
+                "Penghasilan": 1,
                 "Jumlah Keluarga": 4,
             }
         })
@@ -63,6 +63,22 @@ class MlApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn("Tinggi Badan (cm)", response.get_json()["missing_features"])
+
+    def test_predict_rejects_unscaled_income(self):
+        response = self.client.post("/predict", json={
+            "features": {
+                "Umur (bulan)": 31,
+                "Jenis Kelamin Encoded": 1,
+                "Tinggi Badan (cm)": 87.5,
+                "Kelompok Usia": 3,
+                "TB per Bulan": 2.73,
+                "Penghasilan": 2500000,
+                "Jumlah Keluarga": 4,
+            }
+        })
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Penghasilan", response.get_json()["errors"])
 
 
 if __name__ == "__main__":
