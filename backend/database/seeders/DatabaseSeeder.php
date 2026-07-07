@@ -11,6 +11,8 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        \Illuminate\Support\Facades\Schema::disableForeignKeyConstraints();
+
         $password = Hash::make('password');
 
         $adminId = User::query()->create([
@@ -80,6 +82,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $names = ['Raka', 'Alya', 'Naya', 'Bima', 'Salsa', 'Dimas', 'Kinan', 'Adit', 'Laras', 'Rafi'];
+        $genders = ['L', 'P', 'P', 'L', 'P', 'L', 'P', 'L', 'P', 'L'];
         $mothers = ['Wulan', 'Siti', 'Rina', 'Dewi', 'Ayu', 'Maya', 'Novi', 'Fitri', 'Ratna', 'Yuni'];
         for ($i = 1; $i <= 100; $i++) {
             $posyanduId = (($i - 1) % 3) + 1;
@@ -88,7 +91,7 @@ class DatabaseSeeder extends Seeder
                 'nama_balita' => $names[$i % count($names)].' Pratama '.$i,
                 'nik_balita' => '3174'.str_pad((string) $i, 12, '0', STR_PAD_LEFT),
                 'tanggal_lahir' => now()->subMonths(8 + ($i % 48))->subDays($i % 21)->toDateString(),
-                'jenis_kelamin' => $i % 2 === 0 ? 'L' : 'P',
+                'jenis_kelamin' => $genders[$i % count($names)],
                 'nama_ibu' => $mothers[$i % count($mothers)].' Sari',
                 'nik_ibu' => '3271'.str_pad((string) ($i + 500), 12, '0', STR_PAD_LEFT),
                 'alamat' => 'RT '.(($i % 8) + 1).' RW '.(($i % 4) + 1).' Desa '.$this->desa($posyanduId),
@@ -227,6 +230,8 @@ class DatabaseSeeder extends Seeder
             'system',
             []
         ));
+
+        \Illuminate\Support\Facades\Schema::enableForeignKeyConstraints();
     }
 
     private function pmt(string $name, string $type, string $unit, int $stock, int $minimum): array

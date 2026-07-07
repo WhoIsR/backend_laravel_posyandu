@@ -26,3 +26,5 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+backend/firebase-service-account.json
+backend/reset_pass.php

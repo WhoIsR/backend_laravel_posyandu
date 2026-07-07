@@ -13,6 +13,12 @@ class PosyanduMvpTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        \Illuminate\Support\Facades\Schema::disableForeignKeyConstraints();
+    }
+
     public function test_kader_and_bidan_can_login_and_me_returns_role(): void
     {
         $this->createUser('Kader Melati', '3271010101010001', 'kader', 1);
@@ -273,6 +279,63 @@ class PosyanduMvpTest extends TestCase
             ]);
     }
 
+    public function test_worsening_measurement_history_escalates_overall_screening_risk(): void
+    {
+        Http::fake([
+            '*/predict' => Http::response([
+                'predicted_class' => 0,
+                'risk_level' => 'rendah',
+                'probability' => ['rendah' => 0.91, 'sedang' => 0.06, 'tinggi' => 0.03],
+                'model_version' => 'xgboost_v1',
+            ]),
+        ]);
+
+        $kader = $this->createUser('Kader Melati', '3271010101010001', 'kader', 1);
+        $bidan = $this->createUser('Bidan Desa', '197801012006042001', 'bidan', 1);
+        $token = $kader->createToken('test')->plainTextToken;
+        $this->seedPosyandu($bidan->id);
+        $balitaId = $this->seedBalita();
+
+        $oldSesi = DB::table('sesi_posyandu')->insertGetId([
+            'jadwal_posyandu_id' => null,
+            'posyandu_id' => 1,
+            'tanggal' => now()->subMonth()->toDateString(),
+            'status' => 'selesai',
+            'dibuka_oleh' => $kader->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('pengukuran')->insert([
+            'sesi_posyandu_id' => $oldSesi,
+            'balita_id' => $balitaId,
+            'kader_id' => $kader->id,
+            'tanggal_ukur' => now()->subMonth()->toDateString(),
+            'berat_badan' => 12.0,
+            'tinggi_badan' => 88.0,
+            'status_prediksi' => 'selesai',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $sesi = $this->withToken($token)->postJson('/api/sesi', [
+            'jadwal_posyandu_id' => null,
+            'posyandu_id' => 1,
+            'tanggal' => now()->toDateString(),
+        ])->assertCreated();
+
+        $this->withToken($token)->postJson('/api/pengukuran', [
+            'sesi_posyandu_id' => $sesi->json('id'),
+            'balita_id' => $balitaId,
+            'berat_badan' => 11.4,
+            'tinggi_badan' => 87.5,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('hasil_prediksi.risk_level', 'rendah')
+            ->assertJsonPath('continuity_summary.risk_level', 'tinggi')
+            ->assertJsonPath('overall_risk_level', 'tinggi')
+            ->assertJsonPath('rujukan.status_rujukan', 'menunggu_validasi');
+    }
+
     public function test_prediction_failure_keeps_pengukuran_and_allows_retry(): void
     {
         Http::fake([
@@ -475,6 +538,34 @@ class PosyanduMvpTest extends TestCase
         $this->assertGreaterThanOrEqual(10, \DB::table('rujukan')->count());
         $this->assertGreaterThanOrEqual(3, \DB::table('katalog_pmt')->count());
         $this->assertGreaterThanOrEqual(10, \DB::table('notifikasi')->count());
+    }
+
+    public function test_can_log_analytics_events(): void
+    {
+        // Test anonymous logging
+        $this->postJson('/api/analytics', [
+            'event_name' => 'login_failed',
+            'properties' => ['reason' => 'invalid NIK/password'],
+        ])
+        ->assertStatus(201)
+        ->assertJsonPath('event_name', 'login_failed')
+        ->assertJsonPath('properties.reason', 'invalid NIK/password')
+        ->assertJsonPath('user_id', null);
+
+        // Test authenticated logging
+        $kader = $this->createUser('Kader Melati 2', '3271010101010999', 'kader', 1);
+        $token = $kader->createToken('test')->plainTextToken;
+
+        $this->postJson('/api/analytics', [
+            'event_name' => 'measurement_form_saved',
+            'properties' => ['weight' => 12.5, 'height' => 90.2],
+        ], [
+            'Authorization' => 'Bearer '.$token,
+        ])
+        ->assertStatus(201)
+        ->assertJsonPath('event_name', 'measurement_form_saved')
+        ->assertJsonPath('properties.weight', 12.5)
+        ->assertJsonPath('user_id', $kader->id);
     }
 
     private function createUser(string $nama, string $nikNip, string $role, int $posyanduId): User

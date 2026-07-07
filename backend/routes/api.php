@@ -5,6 +5,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [ApiController::class, 'login']);
+Route::post('/analytics', [ApiController::class, 'storeAnalytics']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [ApiController::class, 'logout']);
@@ -48,5 +49,5 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/fcm-token', [ApiController::class, 'updateFcmToken']);
 
     Route::get('/laporan/{type}', [ApiController::class, 'report'])
-        ->whereIn('type', ['prediksi', 'kehadiran', 'distribusi-pmt']);
+        ->whereIn('type', ['prediksi', 'kehadiran', 'distribusi-pmt', 'semua']);
 });

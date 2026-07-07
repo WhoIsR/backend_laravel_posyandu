@@ -190,6 +190,10 @@ class ApiController extends Controller
 
     public function storeBalita(Request $request): JsonResponse
     {
+        if ($forbidden = $this->requireBidanOrKader($request)) {
+            return $forbidden;
+        }
+
         $data = $request->validate([
             'nama_balita' => ['required', 'string'],
             'nik_balita' => ['nullable', 'string'],
@@ -212,20 +216,34 @@ class ApiController extends Controller
         return response()->json($this->row('balita', $id), 201);
     }
 
-    public function showBalita(int $id): JsonResponse
+    public function showBalita(Request $request, int $id): JsonResponse
     {
-        return response()->json($this->rowOrFail('balita', $id));
+        $balita = $this->rowOrFail('balita', $id);
+        $this->checkBalitaAccess($request, $balita);
+        return response()->json($balita);
     }
 
     public function updateBalita(Request $request, int $id): JsonResponse
     {
+        $balita = $this->rowOrFail('balita', $id);
+        $this->checkBalitaAccess($request, $balita);
+
         $data = $request->validate([
+            'nama_balita' => ['sometimes', 'required', 'string'],
+            'nik_balita' => ['nullable', 'string'],
+            'tanggal_lahir' => ['sometimes', 'required', 'date', 'before_or_equal:today'],
+            'jenis_kelamin' => ['sometimes', 'required', 'in:L,P'],
             'nama_ibu' => ['required', 'string'],
+            'nik_ibu' => ['nullable', 'string'],
             'alamat' => ['required', 'string'],
             'penghasilan' => ['required', 'integer', 'min:0'],
             'jumlah_keluarga' => ['required', 'integer', 'min:1'],
             'posyandu_id' => ['required', 'exists:posyandu,id'],
         ]);
+
+        if (isset($data['tanggal_lahir']) && Carbon::parse($data['tanggal_lahir'])->diffInMonths(now()) > 59) {
+            return response()->json(['message' => 'Umur balita yang diproses sistem dibatasi 0-59 bulan.'], 422);
+        }
 
         DB::table('balita')->where('id', $id)->update($this->touch($data));
 
@@ -285,6 +303,10 @@ class ApiController extends Controller
 
     public function storeSesi(Request $request): JsonResponse
     {
+        if ($forbidden = $this->requireBidanOrKader($request)) {
+            return $forbidden;
+        }
+
         $data = $request->validate([
             'jadwal_posyandu_id' => ['nullable', 'exists:jadwal_posyandu,id'],
             'posyandu_id' => ['required', 'exists:posyandu,id'],
@@ -310,8 +332,12 @@ class ApiController extends Controller
         return response()->json($row);
     }
 
-    public function closeSesi(int $id): JsonResponse
+    public function closeSesi(Request $request, int $id): JsonResponse
     {
+        if ($forbidden = $this->requireBidanOrKader($request)) {
+            return $forbidden;
+        }
+
         DB::table('sesi_posyandu')->where('id', $id)->update($this->touch(['status' => 'selesai']));
 
         return response()->json($this->rowOrFail('sesi_posyandu', $id));
@@ -349,8 +375,12 @@ class ApiController extends Controller
         return response()->json($this->pengukuranPayload($id), 201);
     }
 
-    public function retryPrediksi(int $id): JsonResponse
+    public function retryPrediksi(Request $request, int $id): JsonResponse
     {
+        if ($forbidden = $this->requireBidanOrKader($request)) {
+            return $forbidden;
+        }
+
         $this->processPrediction($id);
 
         return response()->json($this->pengukuranPayload($id));
@@ -364,7 +394,17 @@ class ApiController extends Controller
             ->leftJoin('rujukan', 'rujukan.pengukuran_id', '=', 'pengukuran.id')
             ->where('pengukuran.sesi_posyandu_id', $sesiId)
             ->select('pengukuran.*', 'balita.nama_balita', 'balita.nama_ibu', 'hasil_prediksi.risk_level', 'rujukan.status_rujukan')
+            ->orderByDesc('pengukuran.id')
             ->paginate($this->perPage($request));
+
+        $rows->getCollection()->transform(function ($row) {
+            $continuity = $this->continuitySummary((int) $row->balita_id, (int) $row->id);
+            $row->continuity_summary = $continuity;
+            $row->model_risk_level = $row->risk_level;
+            $row->overall_risk_level = $this->highestRisk($row->risk_level, $continuity['risk_level']);
+            $row->risk_level = $row->overall_risk_level;
+            return $row;
+        });
 
         return response()->json($this->paginated($rows));
     }
@@ -393,6 +433,10 @@ class ApiController extends Controller
             ->orderByRaw("case hasil_prediksi.risk_level when 'tinggi' then 1 when 'sedang' then 2 else 3 end")
             ->orderByDesc('rujukan.created_at');
 
+        if ($request->user()->role === 'bidan' && $request->user()->posyandu_id) {
+            $query->where('balita.posyandu_id', $request->user()->posyandu_id);
+        }
+
         if ($request->filled('status')) {
             $query->where('rujukan.status_rujukan', $request->string('status'));
         }
@@ -418,10 +462,14 @@ class ApiController extends Controller
             ->join('pengukuran', 'pengukuran.id', '=', 'rujukan.pengukuran_id')
             ->join('hasil_prediksi', 'hasil_prediksi.id', '=', 'rujukan.hasil_prediksi_id')
             ->where('rujukan.id', $id)
-            ->select('rujukan.*', 'balita.nama_balita', 'balita.nama_ibu', 'balita.tanggal_lahir', 'pengukuran.berat_badan', 'pengukuran.tinggi_badan', 'pengukuran.tanggal_ukur', 'hasil_prediksi.risk_level', 'hasil_prediksi.probability_json', 'hasil_prediksi.model_version')
+            ->select('rujukan.*', 'balita.nama_balita', 'balita.nama_ibu', 'balita.tanggal_lahir', 'balita.posyandu_id', 'pengukuran.berat_badan', 'pengukuran.tinggi_badan', 'pengukuran.tanggal_ukur', 'hasil_prediksi.risk_level', 'hasil_prediksi.probability_json', 'hasil_prediksi.model_version')
             ->first();
 
         abort_if(! $row, 404);
+
+        if ($request->user()->role === 'bidan' && $request->user()->posyandu_id) {
+            abort_if($row->posyandu_id !== $request->user()->posyandu_id, 403, 'Akses ditolak.');
+        }
 
         return response()->json($row);
     }
@@ -432,12 +480,17 @@ class ApiController extends Controller
             return $forbidden;
         }
 
+        $rujukan = $this->rowOrFail('rujukan', $rujukanId);
+        $balita = $this->rowOrFail('balita', $rujukan->balita_id);
+        if ($request->user()->role === 'bidan' && $request->user()->posyandu_id) {
+            abort_if($balita->posyandu_id !== $request->user()->posyandu_id, 403, 'Akses ditolak.');
+        }
+
         $data = $request->validate([
             'keputusan' => ['required', 'in:observasi,konseling,pmt,rujuk_puskesmas,cek_ulang_data'],
             'catatan_bidan' => ['required', 'string'],
         ]);
 
-        $rujukan = $this->rowOrFail('rujukan', $rujukanId);
         $id = DB::table('validasi_medis')->insertGetId($this->withTimestamps([
             'rujukan_id' => $rujukanId,
             'bidan_id' => $request->user()->id,
@@ -452,7 +505,18 @@ class ApiController extends Controller
 
         $pengukuran = $this->row('pengukuran', $rujukan->pengukuran_id);
         if ($pengukuran) {
-            $this->notify($pengukuran->kader_id, 'Validasi selesai', 'Rujukan sudah ditinjau bidan.', 'validasi_selesai', ['rujukan_id' => $rujukanId]);
+            $bidanName = $request->user()->nama ?: 'Bidan';
+            $balitaName = DB::table('balita')->where('id', $rujukan->balita_id)->value('nama_balita') ?: 'Balita';
+            $decText = match ($data['keputusan']) {
+                'observasi' => 'Observasi',
+                'konseling' => 'Konseling',
+                'pmt' => 'PMT',
+                'rujuk_puskesmas' => 'Rujuk Puskesmas',
+                'cek_ulang_data' => 'Cek Ulang Data',
+                default => $data['keputusan']
+            };
+            $msg = sprintf("Bidan %s telah memvalidasi rujukan %s dengan keputusan: %s.", $bidanName, $balitaName, $decText);
+            $this->notify($pengukuran->kader_id, 'Validasi Selesai', $msg, 'validasi_selesai', ['rujukan_id' => $rujukanId]);
         }
 
         return response()->json($this->row('validasi_medis', $id), 201);
@@ -520,17 +584,22 @@ class ApiController extends Controller
             'keterangan' => ['nullable', 'string'],
         ]);
 
+        $balita = $this->rowOrFail('balita', $data['balita_id']);
+        if ($request->user()->role === 'bidan' && $request->user()->posyandu_id) {
+            abort_if($balita->posyandu_id !== $request->user()->posyandu_id, 403, 'Akses ditolak.');
+        }
+
         $validation = $this->row('validasi_medis', $data['validasi_medis_id']);
         if ($validation->keputusan !== 'pmt') {
             return response()->json(['message' => 'Distribusi hanya dapat dibuat dari validasi medis yang membutuhkan PMT.'], 422);
         }
 
-        $pmt = $this->rowOrFail('katalog_pmt', $data['pmt_id']);
-        if ($pmt->stok_saat_ini < $data['jumlah']) {
-            return response()->json(['message' => 'Stok tidak cukup untuk jumlah ini.'], 422);
-        }
+        $id = DB::transaction(function () use ($request, $data) {
+            $pmt = DB::table('katalog_pmt')->where('id', $data['pmt_id'])->lockForUpdate()->first();
+            if (! $pmt || $pmt->stok_saat_ini < $data['jumlah']) {
+                abort(422, 'Stok tidak cukup untuk jumlah ini.');
+            }
 
-        $id = DB::transaction(function () use ($request, $data, $pmt) {
             DB::table('katalog_pmt')->where('id', $data['pmt_id'])->update($this->touch([
                 'stok_saat_ini' => $pmt->stok_saat_ini - $data['jumlah'],
             ]));
@@ -543,7 +612,13 @@ class ApiController extends Controller
         $validation = $this->row('validasi_medis', $data['validasi_medis_id']);
         $rujukan = $this->row('rujukan', $validation->rujukan_id);
         $pengukuran = $this->row('pengukuran', $rujukan->pengukuran_id);
-        $this->notify($pengukuran->kader_id, 'PMT disetujui', 'PMT untuk balita sudah disetujui bidan.', 'pmt_disetujui', ['distribusi_pmt_id' => $id]);
+        if ($pengukuran) {
+            $bidanName = $request->user()->nama ?: 'Bidan';
+            $balitaName = DB::table('balita')->where('id', $rujukan->balita_id)->value('nama_balita') ?: 'Balita';
+            $pmtName = DB::table('katalog_pmt')->where('id', $data['pmt_id'])->value('nama_barang') ?: 'PMT';
+            $msg = sprintf("Bidan %s telah menyetujui distribusi PMT (%s) untuk %s.", $bidanName, $pmtName, $balitaName);
+            $this->notify($pengukuran->kader_id, 'PMT Disetujui', $msg, 'pmt_disetujui', ['distribusi_pmt_id' => $id]);
+        }
 
         return response()->json($this->row('distribusi_pmt', $id), 201);
     }
@@ -560,9 +635,44 @@ class ApiController extends Controller
 
     public function readNotifikasi(Request $request, int $id): JsonResponse
     {
-        DB::table('notifikasi')->where('id', $id)->where('user_id', $request->user()->id)->update($this->touch(['is_read' => true]));
+        $notif = DB::table('notifikasi')
+            ->where('id', $id)
+            ->where('user_id', $request->user()->id)
+            ->first();
 
-        return response()->json($this->notificationPayload($this->rowOrFail('notifikasi', $id)));
+        abort_if(! $notif, 404);
+
+        DB::table('notifikasi')
+            ->where('id', $id)
+            ->update($this->touch(['is_read' => true]));
+
+        $notif->is_read = 1;
+
+        return response()->json($this->notificationPayload($notif));
+    }
+
+    public function storeAnalytics(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'event_name' => ['required', 'string', 'max:100'],
+            'properties' => ['nullable', 'array'],
+        ]);
+
+        $user = $request->user('sanctum');
+
+        $id = DB::table('analytics_events')->insertGetId([
+            'user_id' => $user ? $user->id : null,
+            'event_name' => $data['event_name'],
+            'properties' => isset($data['properties']) ? json_encode($data['properties']) : null,
+            'created_at' => now(),
+        ]);
+
+        $row = DB::table('analytics_events')->where('id', $id)->first();
+        if ($row && isset($row->properties)) {
+            $row->properties = json_decode($row->properties, true);
+        }
+
+        return response()->json($row, 201);
     }
 
     public function updateFcmToken(Request $request): JsonResponse
@@ -579,7 +689,7 @@ class ApiController extends Controller
             return $forbidden;
         }
 
-        abort_unless(in_array($type, ['prediksi', 'kehadiran', 'distribusi-pmt'], true), 404);
+        abort_unless(in_array($type, ['prediksi', 'kehadiran', 'distribusi-pmt', 'semua'], true), 404);
 
         $validator = Validator::make($request->all(), [
             'start_date' => ['nullable', 'date'],
@@ -590,21 +700,36 @@ class ApiController extends Controller
             return response()->json(['message' => 'Rentang tanggal laporan belum valid.', 'errors' => $validator->errors()], 422);
         }
 
-        $titles = [
-            'prediksi' => 'Laporan Prediksi Risiko',
-            'kehadiran' => 'Laporan Kehadiran Posyandu',
-            'distribusi-pmt' => 'Laporan Distribusi PMT',
-        ];
-
-        [$columns, $rows] = $this->reportData($type, $request->query('start_date'), $request->query('end_date'));
         $filename = 'laporan-'.$type.'-'.now()->format('YmdHis').'.pdf';
-        $pdf = Pdf::loadHTML(view('reports.basic', [
-            'title' => $titles[$type],
-            'start' => $request->query('start_date', '-'),
-            'end' => $request->query('end_date', '-'),
-            'columns' => $columns,
-            'rows' => $rows,
-        ])->render());
+
+        if ($type === 'semua') {
+            [$predCols, $predRows] = $this->reportData('prediksi', $request->query('start_date'), $request->query('end_date'));
+            [$kehCols, $kehRows] = $this->reportData('kehadiran', $request->query('start_date'), $request->query('end_date'));
+            [$pmtCols, $pmtRows] = $this->reportData('distribusi-pmt', $request->query('start_date'), $request->query('end_date'));
+
+            $pdf = Pdf::loadHTML(view('reports.semua', [
+                'start' => $request->query('start_date', '-'),
+                'end' => $request->query('end_date', '-'),
+                'prediksi' => ['columns' => $predCols, 'rows' => $predRows],
+                'kehadiran' => ['columns' => $kehCols, 'rows' => $kehRows],
+                'pmt' => ['columns' => $pmtCols, 'rows' => $pmtRows],
+            ])->render());
+        } else {
+            $titles = [
+                'prediksi' => 'Laporan Prediksi Risiko',
+                'kehadiran' => 'Laporan Kehadiran Posyandu',
+                'distribusi-pmt' => 'Laporan Distribusi PMT',
+            ];
+
+            [$columns, $rows] = $this->reportData($type, $request->query('start_date'), $request->query('end_date'));
+            $pdf = Pdf::loadHTML(view('reports.basic', [
+                'title' => $titles[$type],
+                'start' => $request->query('start_date', '-'),
+                'end' => $request->query('end_date', '-'),
+                'columns' => $columns,
+                'rows' => $rows,
+            ])->render());
+        }
 
         return response($pdf->output(), 200)
             ->header('Content-Type', 'application/pdf')
@@ -717,7 +842,10 @@ class ApiController extends Controller
 
             DB::table('pengukuran')->where('id', $pengukuranId)->update($this->touch(['status_prediksi' => 'selesai']));
 
-            if (in_array($riskLevel, ['sedang', 'tinggi'], true) && ! DB::table('rujukan')->where('pengukuran_id', $pengukuranId)->exists()) {
+            $continuity = $this->continuitySummary((int) $balita->id, $pengukuranId);
+            $overallRiskLevel = $this->highestRisk($riskLevel, $continuity['risk_level']);
+
+            if (in_array($overallRiskLevel, ['sedang', 'tinggi'], true) && ! DB::table('rujukan')->where('pengukuran_id', $pengukuranId)->exists()) {
                 $rujukanId = DB::table('rujukan')->insertGetId($this->withTimestamps([
                     'balita_id' => $balita->id,
                     'pengukuran_id' => $pengukuranId,
@@ -728,7 +856,24 @@ class ApiController extends Controller
 
                 $posyandu = $this->row('posyandu', $balita->posyandu_id);
                 if ($posyandu?->bidan_id) {
-                    $this->notify($posyandu->bidan_id, 'Rujukan masuk', 'Ada hasil skrining yang perlu ditinjau.', 'rujukan_masuk', ['rujukan_id' => $rujukanId]);
+                    $kaderName = DB::table('users')->where('id', $pengukuran->kader_id)->value('nama') ?: 'Kader';
+                    $riskLabel = $overallRiskLevel === 'tinggi' ? 'Tinggi' : 'Sedang';
+                    $msg = sprintf(
+                        "%s memasukkan pengukuran untuk %s - BB: %s kg, TB: %s cm (Skrining: %s)",
+                        $kaderName,
+                        $balita->nama_balita,
+                        round($pengukuran->berat_badan, 1),
+                        round($pengukuran->tinggi_badan, 1),
+                        $riskLabel
+                    );
+                    $this->notify($posyandu->bidan_id, 'Rujukan Baru', $msg, 'rujukan_masuk', [
+                        'rujukan_id' => $rujukanId,
+                        'nama_kader' => $kaderName,
+                        'nama_balita' => $balita->nama_balita,
+                        'berat_badan' => (float)$pengukuran->berat_badan,
+                        'tinggi_badan' => (float)$pengukuran->tinggi_badan,
+                        'risk_level' => $overallRiskLevel,
+                    ]);
                 }
             }
         } catch (\Throwable $e) {
@@ -750,7 +895,75 @@ class ApiController extends Controller
         return $pengukuran + [
             'hasil_prediksi' => $hasil,
             'rujukan' => $rujukan,
+            'continuity_summary' => $continuity = $this->continuitySummary((int) $pengukuran['balita_id'], $id),
+            'model_risk_level' => $hasil?->risk_level,
+            'overall_risk_level' => $this->highestRisk($hasil?->risk_level, $continuity['risk_level']),
+            'risk_level' => $this->highestRisk($hasil?->risk_level, $continuity['risk_level']),
         ];
+    }
+
+    private function continuitySummary(int $balitaId, int $untilPengukuranId): array
+    {
+        // ponytail: heuristic overlay; replace with a retrained longitudinal model when labeled history data exists.
+        $rows = DB::table('pengukuran')
+            ->where('balita_id', $balitaId)
+            ->where('id', '<=', $untilPengukuranId)
+            ->orderByDesc('tanggal_ukur')
+            ->orderByDesc('id')
+            ->limit(4)
+            ->get(['id', 'tanggal_ukur', 'berat_badan', 'tinggi_badan'])
+            ->reverse()
+            ->values();
+
+        if ($rows->count() < 2) {
+            return [
+                'risk_level' => 'rendah',
+                'label' => 'Data awal',
+                'data_points' => $rows->count(),
+                'message' => 'Belum ada tren bulanan. Gunakan sebagai baseline dan ukur ulang bulan berikutnya.',
+            ];
+        }
+
+        $first = $rows->first();
+        $latest = $rows->last();
+        $previous = $rows[$rows->count() - 2];
+        $days = max(1, Carbon::parse($first->tanggal_ukur)->diffInDays(Carbon::parse($latest->tanggal_ukur)));
+        $months = max(0.1, $days / 30);
+        $weightDelta = round((float) $latest->berat_badan - (float) $previous->berat_badan, 2);
+        $heightDelta = round((float) $latest->tinggi_badan - (float) $previous->tinggi_badan, 2);
+        $heightVelocity = round(((float) $latest->tinggi_badan - (float) $first->tinggi_badan) / $months, 2);
+
+        $risk = 'rendah';
+        $label = 'Tren stabil';
+        $message = 'Riwayat pengukuran tidak menunjukkan penurunan pada kunjungan terakhir.';
+
+        if ($weightDelta < -0.3 || $heightDelta < 0) {
+            $risk = 'tinggi';
+            $label = 'Tren perlu ditinjau bidan';
+            $message = 'Kunjungan terakhir menunjukkan penurunan BB atau TB. Perlu validasi pengukuran dan peninjauan bidan.';
+        } elseif ($weightDelta < 0 || $heightDelta == 0.0 || $heightVelocity < 0.3) {
+            $risk = 'sedang';
+            $label = 'Tren perlu perhatian';
+            $message = 'Pertumbuhan terakhir melambat. Pantau ulang dan beri edukasi sebelum jadwal berikutnya.';
+        }
+
+        return [
+            'risk_level' => $risk,
+            'label' => $label,
+            'data_points' => $rows->count(),
+            'weight_delta_kg' => $weightDelta,
+            'height_delta_cm' => $heightDelta,
+            'height_velocity_cm_per_month' => $heightVelocity,
+            'message' => $message,
+        ];
+    }
+
+    private function highestRisk(?string $modelRisk, ?string $trendRisk): string
+    {
+        $rank = ['rendah' => 0, 'sedang' => 1, 'tinggi' => 2];
+        $model = $rank[$modelRisk ?? 'rendah'] ?? 0;
+        $trend = $rank[$trendRisk ?? 'rendah'] ?? 0;
+        return array_search(max($model, $trend), $rank, true) ?: 'rendah';
     }
 
     private function requireBidan(Request $request): ?JsonResponse
@@ -760,9 +973,24 @@ class ApiController extends Controller
             : response()->json(['message' => 'Akses ditolak.'], 403);
     }
 
+    private function checkBalitaAccess(Request $request, object $balita): void
+    {
+        if ($request->user()->role === 'admin') {
+            return;
+        }
+        abort_if($balita->posyandu_id !== $request->user()->posyandu_id, 403, 'Akses ditolak.');
+    }
+
     private function requireBidanOrAdmin(Request $request): ?JsonResponse
     {
         return in_array($request->user()->role, ['bidan', 'admin'], true)
+            ? null
+            : response()->json(['message' => 'Akses ditolak.'], 403);
+    }
+
+    private function requireBidanOrKader(Request $request): ?JsonResponse
+    {
+        return in_array($request->user()->role, ['bidan', 'kader'], true)
             ? null
             : response()->json(['message' => 'Akses ditolak.'], 403);
     }
@@ -899,31 +1127,75 @@ class ApiController extends Controller
 
     private function sendFcmNotification(int $userId, string $judul, string $pesan, string $tipe, array $data): void
     {
-        $serverKey = config('services.fcm.server_key');
-        if (! $serverKey) {
-            return;
-        }
-
         $token = User::query()->whereKey($userId)->value('fcm_token');
-        if (! $token) {
+        if (! $token || !file_exists(base_path('firebase-service-account.json'))) {
             return;
         }
 
         try {
-            Http::timeout((int) config('services.fcm.timeout'))
-                ->withHeaders(['Authorization' => 'key='.$serverKey])
-                ->post(config('services.fcm.endpoint'), [
-                    'to' => $token,
-                    'notification' => [
-                        'title' => $judul,
-                        'body' => $pesan,
-                    ],
-                    'data' => $data + [
-                        'tipe' => $tipe,
-                    ],
+            $accessToken = $this->getGoogleAccessToken();
+            if (!$accessToken) {
+                return;
+            }
+
+            $json = json_decode(file_get_contents(base_path('firebase-service-account.json')), true);
+            $projectId = $json['project_id'];
+
+            // Note: FCM v1 API requires values in 'data' to be strings.
+            $stringifiedData = collect(array_merge($data, ['click_action' => 'FLUTTER_NOTIFICATION_CLICK', 'type' => $tipe]))
+                ->map(fn($value) => (string) $value)
+                ->toArray();
+
+            Http::withToken($accessToken)
+                ->timeout((int) config('services.fcm.timeout', 5))
+                ->post("https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send", [
+                    'message' => [
+                        'token' => $token,
+                        'notification' => [
+                            'title' => $judul,
+                            'body' => $pesan,
+                        ],
+                        'data' => $stringifiedData,
+                    ]
                 ]);
         } catch (\Throwable $e) {
             report($e);
         }
+    }
+
+    private function getGoogleAccessToken(): ?string
+    {
+        $path = base_path('firebase-service-account.json');
+        if (!file_exists($path)) {
+            return null;
+        }
+
+        $json = json_decode(file_get_contents($path), true);
+        $header = json_encode(['alg' => 'RS256', 'typ' => 'JWT']);
+        $now = time();
+        $payload = json_encode([
+            'iss' => $json['client_email'],
+            'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+            'aud' => $json['token_uri'],
+            'exp' => $now + 3600,
+            'iat' => $now
+        ]);
+
+        $base64UrlEncode = function($data) {
+            return str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($data));
+        };
+
+        $base64Header = $base64UrlEncode($header);
+        $base64Payload = $base64UrlEncode($payload);
+
+        openssl_sign($base64Header . "." . $base64Payload, $signature, $json['private_key'], "sha256WithRSAEncryption");
+        $jwt = $base64Header . "." . $base64Payload . "." . $base64UrlEncode($signature);
+
+        $response = Http::asForm()->post($json['token_uri'], [
+            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            'assertion' => $jwt
+        ]);
+
+        return $response->json('access_token');
     }
 }
