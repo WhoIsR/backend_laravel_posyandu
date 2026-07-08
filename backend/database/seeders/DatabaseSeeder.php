@@ -177,11 +177,11 @@ class DatabaseSeeder extends Seeder
                 $heightGrowth = $visitNumber * 0.7;
                 $weightGrowth = $visitNumber * 0.25;
 
-                if ($child->id % 13 === 0 && $visitNumber >= 4) {
+                if ($child->id % 13 === 0 && $visitNumber === 5) {
                     $weightGrowth -= 1.0;
                 }
-                if ($child->id % 11 === 0 && $visitNumber >= 4) {
-                    $heightGrowth -= 0.8;
+                if ($child->id % 11 === 0 && $visitNumber === 5) {
+                    $heightGrowth -= 1.0;
                 }
 
                 $height = round(68 + ($child->id % 18) + $heightGrowth, 1);
