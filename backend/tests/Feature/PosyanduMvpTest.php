@@ -334,6 +334,8 @@ class PosyanduMvpTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('hasil_prediksi.risk_level', 'rendah')
             ->assertJsonPath('continuity_summary.risk_level', 'tinggi')
+            ->assertJsonPath('continuity_summary.measurements.0.berat_badan', 12)
+            ->assertJsonPath('continuity_summary.measurements.1.berat_badan', 11.4)
             ->assertJsonPath('overall_risk_level', 'tinggi')
             ->assertJsonPath('rujukan.status_rujukan', 'menunggu_validasi');
     }

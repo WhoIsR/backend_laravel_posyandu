@@ -902,9 +902,30 @@ class ApiController extends Controller
         ];
     }
 
+    private function measurementHistory($rows): array
+    {
+        $previous = null;
+
+        return $rows->values()->map(function ($row, int $index) use (&$previous) {
+            $weight = round((float) $row->berat_badan, 2);
+            $height = round((float) $row->tinggi_badan, 2);
+            $item = [
+                'measurement_id' => (int) $row->id,
+                'visit_label' => 'Kunjungan '.($index + 1),
+                'tanggal_ukur' => $row->tanggal_ukur,
+                'berat_badan' => $weight,
+                'tinggi_badan' => $height,
+                'weight_delta_kg' => $previous ? round($weight - (float) $previous->berat_badan, 2) : null,
+                'height_delta_cm' => $previous ? round($height - (float) $previous->tinggi_badan, 2) : null,
+            ];
+
+            $previous = $row;
+            return $item;
+        })->all();
+    }
+
     private function continuitySummary(int $balitaId, int $untilPengukuranId): array
     {
-        // ponytail: heuristic overlay; replace with a retrained longitudinal model when labeled history data exists.
         $rows = DB::table('pengukuran')
             ->where('balita_id', $balitaId)
             ->where('id', '<=', $untilPengukuranId)
@@ -915,12 +936,15 @@ class ApiController extends Controller
             ->reverse()
             ->values();
 
+        $history = $this->measurementHistory($rows);
+
         if ($rows->count() < 2) {
             return [
                 'risk_level' => 'rendah',
                 'label' => 'Data awal',
                 'data_points' => $rows->count(),
                 'message' => 'Belum ada tren bulanan. Gunakan sebagai baseline dan ukur ulang bulan berikutnya.',
+                'measurements' => $history,
             ];
         }
 
@@ -955,9 +979,9 @@ class ApiController extends Controller
             'height_delta_cm' => $heightDelta,
             'height_velocity_cm_per_month' => $heightVelocity,
             'message' => $message,
+            'measurements' => $history,
         ];
     }
-
     private function highestRisk(?string $modelRisk, ?string $trendRisk): string
     {
         $rank = ['rendah' => 0, 'sedang' => 1, 'tinggi' => 2];
@@ -1070,7 +1094,6 @@ class ApiController extends Controller
 
     private function kategoriPenghasilan(int $penghasilan): int
     {
-        // ponytail: keep the training-time 1/2/3 scale; update if the model metadata changes.
         $umkTangerang = 5210377;
 
         return match (true) {
