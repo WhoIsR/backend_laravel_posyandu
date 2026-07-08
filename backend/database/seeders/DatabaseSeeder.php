@@ -15,6 +15,26 @@ class DatabaseSeeder extends Seeder
 
         $password = Hash::make('password');
 
+        foreach ([
+            'analytics_events',
+            'notifikasi',
+            'distribusi_pmt',
+            'validasi_medis',
+            'rujukan',
+            'hasil_prediksi',
+            'pengukuran',
+            'sesi_posyandu',
+            'jadwal_posyandu',
+            'katalog_pmt',
+            'balita',
+            'posyandu',
+            'users',
+        ] as $table) {
+            if (DB::getSchemaBuilder()->hasTable($table)) {
+                DB::table($table)->delete();
+            }
+        }
+
         $adminId = User::query()->create([
             'nama' => 'Admin Posyandu',
             'nik_nip' => '199001012020011001',
@@ -81,18 +101,30 @@ class DatabaseSeeder extends Seeder
             $this->pmt('Kacang Hijau', 'bahan pangan', 'kg', 16, 8),
         ]);
 
-        $names = ['Raka', 'Alya', 'Naya', 'Bima', 'Salsa', 'Dimas', 'Kinan', 'Adit', 'Laras', 'Rafi'];
-        $genders = ['L', 'P', 'P', 'L', 'P', 'L', 'P', 'L', 'P', 'L'];
-        $mothers = ['Wulan', 'Siti', 'Rina', 'Dewi', 'Ayu', 'Maya', 'Novi', 'Fitri', 'Ratna', 'Yuni'];
+        $childNames = [
+            'Raka Aditya', 'Alya Safira', 'Naya Kirana', 'Bima Farrel', 'Salsa Nabila',
+            'Dimas Arkan', 'Kinan Maharani', 'Adit Ramadhan', 'Laras Anindya', 'Rafi Alvaro',
+            'Mika Prameswari', 'Farhan Akbar', 'Naura Azzahra', 'Gilang Pratama', 'Keisha Amalia',
+            'Rania Putri', 'Bagas Saputra', 'Zahra Lestari', 'Fathan Rizqi', 'Aurel Cahyani',
+        ];
+        $familyNames = ['Wijaya', 'Prasetyo', 'Hidayat', 'Saputra', 'Lestari'];
+        $genders = ['L', 'P', 'P', 'L', 'P', 'L', 'P', 'L', 'P', 'L', 'P', 'L', 'P', 'L', 'P', 'P', 'L', 'P', 'L', 'P'];
+        $mothers = [
+            'Wulan Handayani', 'Siti Aminah', 'Rina Marlina', 'Dewi Kartika', 'Ayu Permatasari',
+            'Maya Lestari', 'Novi Rahmawati', 'Fitri Nurlaila', 'Ratna Wulandari', 'Yuni Astuti',
+            'Ika Puspitasari', 'Marlina Suryani', 'Desi Anggraini', 'Tari Andriani', 'Nurhayati',
+        ];
         for ($i = 1; $i <= 100; $i++) {
             $posyanduId = (($i - 1) % 3) + 1;
+            $baseName = $childNames[($i - 1) % count($childNames)];
+            $familyName = $familyNames[intdiv($i - 1, count($childNames)) % count($familyNames)];
             DB::table('balita')->insert([
                 'posyandu_id' => $posyanduId,
-                'nama_balita' => $names[$i % count($names)].' Pratama '.$i,
+                'nama_balita' => $baseName.' '.$familyName,
                 'nik_balita' => '3174'.str_pad((string) $i, 12, '0', STR_PAD_LEFT),
                 'tanggal_lahir' => now()->subMonths(8 + ($i % 48))->subDays($i % 21)->toDateString(),
-                'jenis_kelamin' => $genders[$i % count($names)],
-                'nama_ibu' => $mothers[$i % count($mothers)].' Sari',
+                'jenis_kelamin' => $genders[($i - 1) % count($genders)],
+                'nama_ibu' => $mothers[($i - 1) % count($mothers)],
                 'nik_ibu' => '3271'.str_pad((string) ($i + 500), 12, '0', STR_PAD_LEFT),
                 'alamat' => 'RT '.(($i % 8) + 1).' RW '.(($i % 4) + 1).' Desa '.$this->desa($posyanduId),
                 'penghasilan' => 1200000 + (($i % 9) * 350000),
@@ -103,32 +135,34 @@ class DatabaseSeeder extends Seeder
         }
 
         $sessionIds = [];
-        for ($i = 0; $i < 6; $i++) {
-            $posyanduId = ($i % 3) + 1;
-            $date = now()->subMonths(5 - $i)->startOfMonth()->addDays(9)->toDateString();
-            $jadwalId = DB::table('jadwal_posyandu')->insertGetId([
-                'posyandu_id' => $posyanduId,
-                'tanggal' => $date,
-                'jam_mulai' => '08:00',
-                'jam_selesai' => '11:00',
-                'lokasi' => 'Balai '.$this->desa($posyanduId),
-                'keterangan' => 'Sesi timbang dan ukur bulanan.',
-                'notif_h1_sent' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-            $sessionIds[] = DB::table('sesi_posyandu')->insertGetId([
-                'jadwal_posyandu_id' => $jadwalId,
-                'posyandu_id' => $posyanduId,
-                'tanggal' => $date,
-                'status' => $i >= 3 ? 'berjalan' : 'selesai',
-                'dibuka_oleh' => $kaderIds[$posyanduId][0],
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+        for ($monthIndex = 0; $monthIndex < 6; $monthIndex++) {
+            $date = now()->subMonths(5 - $monthIndex)->startOfMonth()->addDays(9)->toDateString();
+            foreach ([1, 2, 3] as $posyanduId) {
+                $jadwalId = DB::table('jadwal_posyandu')->insertGetId([
+                    'posyandu_id' => $posyanduId,
+                    'tanggal' => $date,
+                    'jam_mulai' => '08:00',
+                    'jam_selesai' => '11:00',
+                    'lokasi' => 'Balai '.$this->desa($posyanduId),
+                    'keterangan' => 'Sesi timbang dan ukur bulanan.',
+                    'notif_h1_sent' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+                $sessionIds[] = DB::table('sesi_posyandu')->insertGetId([
+                    'jadwal_posyandu_id' => $jadwalId,
+                    'posyandu_id' => $posyanduId,
+                    'tanggal' => $date,
+                    'status' => $monthIndex === 5 ? 'berjalan' : 'selesai',
+                    'dibuka_oleh' => $kaderIds[$posyanduId][0],
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
         }
 
         $measurementNo = 0;
+        $historyCountByChild = [];
         foreach ($sessionIds as $index => $sessionId) {
             $session = DB::table('sesi_posyandu')->where('id', $sessionId)->first();
             $children = DB::table('balita')
@@ -138,8 +172,20 @@ class DatabaseSeeder extends Seeder
                 ->get();
             foreach ($children as $child) {
                 $measurementNo++;
-                $height = 70 + (($child->id + $index) % 28);
-                $weight = 7 + (($child->id + $index) % 12) * 0.45;
+                $visitNumber = $historyCountByChild[$child->id] ?? 0;
+                $historyCountByChild[$child->id] = $visitNumber + 1;
+                $heightGrowth = $visitNumber * 0.7;
+                $weightGrowth = $visitNumber * 0.25;
+
+                if ($child->id % 13 === 0 && $visitNumber >= 4) {
+                    $weightGrowth -= 1.0;
+                }
+                if ($child->id % 11 === 0 && $visitNumber >= 4) {
+                    $heightGrowth -= 0.8;
+                }
+
+                $height = round(68 + ($child->id % 18) + $heightGrowth, 1);
+                $weight = round(7.2 + (($child->id % 10) * 0.35) + $weightGrowth, 2);
                 $risk = $measurementNo % 7 === 0 ? 'tinggi' : ($measurementNo % 4 === 0 ? 'sedang' : 'rendah');
                 $pengukuranId = DB::table('pengukuran')->insertGetId([
                     'sesi_posyandu_id' => $sessionId,

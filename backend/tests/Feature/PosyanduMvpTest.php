@@ -540,6 +540,15 @@ class PosyanduMvpTest extends TestCase
         $this->assertGreaterThanOrEqual(10, \DB::table('rujukan')->count());
         $this->assertGreaterThanOrEqual(3, \DB::table('katalog_pmt')->count());
         $this->assertGreaterThanOrEqual(10, \DB::table('notifikasi')->count());
+
+        $childWithHistory = \DB::table('pengukuran')
+            ->select('balita_id', \DB::raw('count(*) as total'))
+            ->groupBy('balita_id')
+            ->having('total', '>=', 4)
+            ->first();
+
+        $this->assertNotNull($childWithHistory);
+        $this->assertDatabaseMissing('balita', ['nama_balita' => 'Alya Pratama 61']);
     }
 
     public function test_can_log_analytics_events(): void
