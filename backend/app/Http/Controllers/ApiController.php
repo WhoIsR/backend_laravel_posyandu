@@ -1169,6 +1169,13 @@ class ApiController extends Controller
                             'title' => $judul,
                             'body' => $pesan,
                         ],
+                        'android' => [
+                            'priority' => 'HIGH',
+                            'notification' => [
+                                'channel_id' => 'posyandu_alerts',
+                                'sound' => 'default',
+                            ],
+                        ],
                         'data' => $stringifiedData,
                     ]
                 ]);
