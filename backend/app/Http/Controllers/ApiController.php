@@ -515,7 +515,7 @@ class ApiController extends Controller
                 'cek_ulang_data' => 'Cek Ulang Data',
                 default => $data['keputusan']
             };
-            $msg = sprintf("Bidan %s telah memvalidasi rujukan %s dengan keputusan: %s.", $bidanName, $balitaName, $decText);
+            $msg = sprintf("%s telah memvalidasi rujukan %s dengan keputusan: %s.", $bidanName, $balitaName, $decText);
             $this->notify($pengukuran->kader_id, 'Validasi Selesai', $msg, 'validasi_selesai', ['rujukan_id' => $rujukanId]);
         }
 
@@ -1213,3 +1213,4 @@ class ApiController extends Controller
         return $response->json('access_token');
     }
 }
+
