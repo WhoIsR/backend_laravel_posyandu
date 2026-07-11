@@ -80,6 +80,13 @@ class MlApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("Penghasilan", response.get_json()["errors"])
 
+    def test_runtime_rejects_legacy_xgboost_artifact(self):
+        from app import load_model
+
+        legacy_model = os.path.join(os.path.dirname(__file__), "..", "stunting_model.json")
+        with self.assertRaisesRegex(ValueError, "Random Forest"):
+            load_model(legacy_model)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,11 +5,6 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-try:
-    import xgboost as xgb
-except ImportError:
-    xgb = None
-
 
 DEFAULT_FEATURES = [
     "Umur (bulan)",
@@ -33,8 +28,6 @@ RISK_LABELS = {
 def create_app(config=None):
     app = Flask(__name__)
     default_model = Path(__file__).with_name("stunting_model.pkl")
-    if not default_model.exists():
-        default_model = Path(__file__).with_name("stunting_model.json")
 
     app.config.update(
         MODEL_PATH=os.environ.get("MODEL_PATH", str(default_model)),
@@ -112,12 +105,8 @@ def load_model(path):
     if not model_path.exists():
         raise FileNotFoundError(f"Model file not found: {model_path}")
 
-    if model_path.suffix.lower() == ".json":
-        if xgb is None:
-            raise RuntimeError("xgboost is required to load JSON model files.")
-        model = xgb.XGBClassifier()
-        model.load_model(model_path)
-        return model
+    if model_path.suffix.lower() != ".pkl":
+        raise ValueError("Layanan prediksi hanya menggunakan artefak Random Forest berformat .pkl.")
 
     with model_path.open("rb") as file:
         return pickle.load(file)
