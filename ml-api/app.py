@@ -32,13 +32,13 @@ RISK_LABELS = {
 
 def create_app(config=None):
     app = Flask(__name__)
-    default_model = Path(__file__).with_name("stunting_model.json")
+    default_model = Path(__file__).with_name("stunting_model.pkl")
     if not default_model.exists():
-        default_model = Path(__file__).with_name("stunting_model.pkl")
+        default_model = Path(__file__).with_name("stunting_model.json")
 
     app.config.update(
         MODEL_PATH=os.environ.get("MODEL_PATH", str(default_model)),
-        MODEL_VERSION=os.environ.get("MODEL_VERSION", "xgboost_v1"),
+        MODEL_VERSION=os.environ.get("MODEL_VERSION", "random_forest_v1"),
     )
     if config:
         app.config.update(config)
