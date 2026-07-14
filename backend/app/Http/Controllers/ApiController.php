@@ -263,7 +263,7 @@ class ApiController extends Controller
 
     public function storeJadwal(Request $request): JsonResponse
     {
-        if ($forbidden = $this->requireBidan($request)) {
+        if ($forbidden = $this->requireBidanOrAdmin($request)) {
             return $forbidden;
         }
 
@@ -283,7 +283,7 @@ class ApiController extends Controller
 
     public function updateJadwal(Request $request, int $id): JsonResponse
     {
-        if ($forbidden = $this->requireBidan($request)) {
+        if ($forbidden = $this->requireBidanOrAdmin($request)) {
             return $forbidden;
         }
 
@@ -303,7 +303,7 @@ class ApiController extends Controller
 
     public function storeSesi(Request $request): JsonResponse
     {
-        if ($forbidden = $this->requireBidanOrKader($request)) {
+        if ($forbidden = $this->requireBidanOrAdminOrKader($request)) {
             return $forbidden;
         }
 
@@ -334,7 +334,7 @@ class ApiController extends Controller
 
     public function closeSesi(Request $request, int $id): JsonResponse
     {
-        if ($forbidden = $this->requireBidanOrKader($request)) {
+        if ($forbidden = $this->requireBidanOrAdminOrKader($request)) {
             return $forbidden;
         }
 
@@ -1015,6 +1015,13 @@ class ApiController extends Controller
     private function requireBidanOrKader(Request $request): ?JsonResponse
     {
         return in_array($request->user()->role, ['bidan', 'kader'], true)
+            ? null
+            : response()->json(['message' => 'Akses ditolak.'], 403);
+    }
+
+    private function requireBidanOrAdminOrKader(Request $request): ?JsonResponse
+    {
+        return in_array($request->user()->role, ['bidan', 'admin', 'kader'], true)
             ? null
             : response()->json(['message' => 'Akses ditolak.'], 403);
     }
