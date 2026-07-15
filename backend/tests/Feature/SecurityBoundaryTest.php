@@ -169,6 +169,41 @@ class SecurityBoundaryTest extends TestCase
             ->assertJsonPath('message', 'Prediksi hanya dapat dicoba lagi setelah status gagal.');
     }
 
+    public function test_password_reset_revokes_existing_tokens(): void
+    {
+        $admin = User::query()->create([
+            'nama' => 'Admin Posyandu',
+            'nik_nip' => '199001012020011001',
+            'password' => Hash::make('password'),
+            'role' => 'admin',
+            'posyandu_id' => null,
+            'status' => 'aktif',
+        ]);
+        $kader = $this->createUser('Kader Melati', '3271010101010001', 'kader', 1);
+        $adminToken = $admin->createToken('test')->plainTextToken;
+        $kaderToken = $kader->createToken('test')->plainTextToken;
+
+        $this->withToken($adminToken)->putJson('/api/admin/users/'.$kader->id, [
+            'nama' => $kader->nama,
+            'role' => 'kader',
+            'posyandu_id' => 1,
+            'status' => 'aktif',
+            'password' => 'password-baru',
+        ])->assertOk();
+
+        $this->assertDatabaseMissing('personal_access_tokens', [
+            'token' => hash('sha256', explode('|', $kaderToken, 2)[1]),
+        ]);
+    }
+
+    public function test_anonymous_analytics_rejects_oversized_properties(): void
+    {
+        $this->postJson('/api/analytics', [
+            'event_name' => 'login_failed',
+            'properties' => ['message' => str_repeat('x', 5000)],
+        ])->assertUnprocessable();
+    }
+
     private function createUser(string $name, string $nik, string $role, int $posyanduId): User
     {
         return User::query()->create([

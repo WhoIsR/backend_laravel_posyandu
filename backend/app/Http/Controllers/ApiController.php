@@ -126,7 +126,7 @@ class ApiController extends Controller
 
         User::query()->whereKey($id)->whereIn('role', ['bidan', 'kader'])->update($update);
 
-        if ($data['status'] === 'nonaktif') {
+        if ($data['status'] === 'nonaktif' || ! empty($data['password'])) {
             User::query()->findOrFail($id)->tokens()->delete();
         }
 
@@ -721,12 +721,15 @@ class ApiController extends Controller
     {
         $data = $request->validate([
             'event_name' => ['required', 'string', 'max:100'],
-            'properties' => ['nullable', 'array'],
+            'properties' => ['nullable', 'array', 'max:30'],
         ]);
 
         $user = $request->user('sanctum');
 
         $properties = $this->sanitizeAnalyticsProperties($data['properties'] ?? []);
+        if (strlen((string) json_encode($properties)) > 4096) {
+            return response()->json(['message' => 'Data analytics terlalu besar.'], 422);
+        }
         $id = DB::table('analytics_events')->insertGetId([
             'user_id' => $user ? $user->id : null,
             'event_name' => $data['event_name'],
