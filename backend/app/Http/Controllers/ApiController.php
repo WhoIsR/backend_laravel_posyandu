@@ -35,6 +35,10 @@ class ApiController extends Controller
             return response()->json(['message' => 'Akun ini sedang nonaktif. Hubungi admin Posyandu.'], 403);
         }
 
+        if (in_array($user->role, ['bidan', 'kader'], true) && ! $user->posyandu_id) {
+            return response()->json(['message' => 'Akun belum terhubung ke Posyandu. Hubungi admin.'], 403);
+        }
+
         return response()->json([
             'token' => $user->createToken('mobile')->plainTextToken,
             'user' => $this->publicUser($user),
@@ -80,7 +84,7 @@ class ApiController extends Controller
             'nik_nip' => ['required', 'string', 'unique:users,nik_nip'],
             'password' => ['required', 'string', 'min:6'],
             'role' => ['required', 'in:bidan,kader'],
-            'posyandu_id' => ['nullable', 'exists:posyandu,id'],
+            'posyandu_id' => ['required', 'exists:posyandu,id'],
             'status' => ['required', 'in:aktif,nonaktif'],
         ]);
 
@@ -105,7 +109,7 @@ class ApiController extends Controller
         $data = $request->validate([
             'nama' => ['required', 'string'],
             'role' => ['required', 'in:bidan,kader'],
-            'posyandu_id' => ['nullable', 'exists:posyandu,id'],
+            'posyandu_id' => ['required', 'exists:posyandu,id'],
             'status' => ['required', 'in:aktif,nonaktif'],
             'password' => ['nullable', 'string', 'min:6'],
         ]);
@@ -121,6 +125,10 @@ class ApiController extends Controller
         }
 
         User::query()->whereKey($id)->whereIn('role', ['bidan', 'kader'])->update($update);
+
+        if ($data['status'] === 'nonaktif') {
+            User::query()->findOrFail($id)->tokens()->delete();
+        }
 
         return response()->json($this->publicUser(User::query()->findOrFail($id)));
     }
@@ -171,7 +179,7 @@ class ApiController extends Controller
             ->select('balita.*', 'latest_pengukuran.berat_badan as latest_weight', 'latest_pengukuran.tinggi_badan as latest_height', 'latest_pengukuran.tanggal_ukur as latest_measured_at')
             ->orderBy('balita.nama_balita');
 
-        if ($request->user()->role === 'kader') {
+        if ($request->user()->role !== 'admin' && $request->user()->posyandu_id) {
             $query->where('balita.posyandu_id', $request->user()->posyandu_id);
         } elseif ($request->filled('posyandu_id')) {
             $query->where('balita.posyandu_id', $request->integer('posyandu_id'));
@@ -211,6 +219,10 @@ class ApiController extends Controller
             return response()->json(['message' => 'Umur balita yang diproses sistem dibatasi 0-59 bulan.'], 422);
         }
 
+        if ($request->user()->posyandu_id) {
+            $data['posyandu_id'] = $request->user()->posyandu_id;
+        }
+
         $id = DB::table('balita')->insertGetId($this->withTimestamps($data));
 
         return response()->json($this->row('balita', $id), 201);
@@ -245,6 +257,11 @@ class ApiController extends Controller
             return response()->json(['message' => 'Umur balita yang diproses sistem dibatasi 0-59 bulan.'], 422);
         }
 
+
+        if ($request->user()->posyandu_id) {
+            $data['posyandu_id'] = $request->user()->posyandu_id;
+        }
+
         DB::table('balita')->where('id', $id)->update($this->touch($data));
 
         return response()->json($this->rowOrFail('balita', $id));
@@ -254,7 +271,7 @@ class ApiController extends Controller
     {
         $query = DB::table('jadwal_posyandu')->orderBy('tanggal');
 
-        if ($request->user()->role === 'kader') {
+        if ($request->user()->role !== 'admin' && $request->user()->posyandu_id) {
             $query->where('posyandu_id', $request->user()->posyandu_id);
         }
 
@@ -276,6 +293,10 @@ class ApiController extends Controller
             'keterangan' => ['nullable', 'string'],
         ]);
 
+        if ($request->user()->role === 'bidan' && $request->user()->posyandu_id) {
+            $data['posyandu_id'] = $request->user()->posyandu_id;
+        }
+
         $id = DB::table('jadwal_posyandu')->insertGetId($this->withTimestamps($data + ['notif_h1_sent' => false]));
 
         return response()->json($this->row('jadwal_posyandu', $id), 201);
@@ -296,6 +317,12 @@ class ApiController extends Controller
             'keterangan' => ['nullable', 'string'],
         ]);
 
+        $jadwal = $this->rowOrFail('jadwal_posyandu', $id);
+        if ($request->user()->role === 'bidan' && $request->user()->posyandu_id) {
+            abort_if($jadwal->posyandu_id !== $request->user()->posyandu_id, 403, 'Akses ditolak.');
+            $data['posyandu_id'] = $request->user()->posyandu_id;
+        }
+
         DB::table('jadwal_posyandu')->where('id', $id)->update($this->touch($data));
 
         return response()->json($this->rowOrFail('jadwal_posyandu', $id));
@@ -312,6 +339,10 @@ class ApiController extends Controller
             'posyandu_id' => ['required', 'exists:posyandu,id'],
             'tanggal' => ['required', 'date'],
         ]);
+
+        if ($request->user()->role !== 'admin' && $request->user()->posyandu_id) {
+            $data['posyandu_id'] = $request->user()->posyandu_id;
+        }
 
         $id = DB::table('sesi_posyandu')->insertGetId($this->withTimestamps($data + [
             'status' => 'berjalan',
@@ -338,6 +369,9 @@ class ApiController extends Controller
             return $forbidden;
         }
 
+        $sesi = $this->rowOrFail('sesi_posyandu', $id);
+        $this->checkPosyanduAccess($request, (int) $sesi->posyandu_id);
+
         DB::table('sesi_posyandu')->where('id', $id)->update($this->touch(['status' => 'selesai']));
 
         return response()->json($this->rowOrFail('sesi_posyandu', $id));
@@ -355,6 +389,13 @@ class ApiController extends Controller
             'berat_badan' => ['required', 'numeric', 'between:1,40'],
             'tinggi_badan' => ['required', 'numeric', 'between:30,130'],
         ]);
+
+        $sesi = $this->rowOrFail('sesi_posyandu', $data['sesi_posyandu_id']);
+        $balita = $this->rowOrFail('balita', $data['balita_id']);
+        $this->checkPosyanduAccess($request, (int) $sesi->posyandu_id);
+        $this->checkPosyanduAccess($request, (int) $balita->posyandu_id);
+        abort_if($sesi->posyandu_id !== $balita->posyandu_id, 422, 'Balita dan sesi harus berasal dari Posyandu yang sama.');
+        abort_if($sesi->status !== 'berjalan', 422, 'Sesi Posyandu sudah tidak aktif.');
 
         if (DB::table('pengukuran')->where('sesi_posyandu_id', $data['sesi_posyandu_id'])->where('balita_id', $data['balita_id'])->exists()) {
             return response()->json(['message' => 'Balita ini sudah dicatat pada sesi hari ini.'], 422);
@@ -381,6 +422,18 @@ class ApiController extends Controller
             return $forbidden;
         }
 
+        $pengukuran = $this->rowOrFail('pengukuran', $id);
+        $balita = $this->rowOrFail('balita', $pengukuran->balita_id);
+        $this->checkPosyanduAccess($request, (int) $balita->posyandu_id);
+
+        $claimed = DB::table('pengukuran')
+            ->where('id', $id)
+            ->where('status_prediksi', 'gagal')
+            ->update($this->touch(['status_prediksi' => 'diproses']));
+        if ($claimed !== 1) {
+            return response()->json(['message' => 'Prediksi hanya dapat dicoba lagi setelah status gagal.'], 422);
+        }
+
         $this->processPrediction($id);
 
         return response()->json($this->pengukuranPayload($id));
@@ -388,6 +441,9 @@ class ApiController extends Controller
 
     public function skrining(Request $request, int $sesiId): JsonResponse
     {
+        $sesi = $this->rowOrFail('sesi_posyandu', $sesiId);
+        $this->checkPosyanduAccess($request, (int) $sesi->posyandu_id);
+
         $rows = DB::table('pengukuran')
             ->leftJoin('balita', 'balita.id', '=', 'pengukuran.balita_id')
             ->leftJoin('hasil_prediksi', 'hasil_prediksi.pengukuran_id', '=', 'pengukuran.id')
@@ -480,28 +536,32 @@ class ApiController extends Controller
             return $forbidden;
         }
 
-        $rujukan = $this->rowOrFail('rujukan', $rujukanId);
-        $balita = $this->rowOrFail('balita', $rujukan->balita_id);
-        if ($request->user()->role === 'bidan' && $request->user()->posyandu_id) {
-            abort_if($balita->posyandu_id !== $request->user()->posyandu_id, 403, 'Akses ditolak.');
-        }
-
         $data = $request->validate([
             'keputusan' => ['required', 'in:observasi,konseling,pmt,rujuk_puskesmas,cek_ulang_data'],
             'catatan_bidan' => ['required', 'string'],
         ]);
 
-        $id = DB::table('validasi_medis')->insertGetId($this->withTimestamps([
-            'rujukan_id' => $rujukanId,
-            'bidan_id' => $request->user()->id,
-            'keputusan' => $data['keputusan'],
-            'catatan_bidan' => $data['catatan_bidan'],
-            'tanggal_validasi' => now()->toDateString(),
-        ]));
+        [$id, $rujukan] = DB::transaction(function () use ($request, $rujukanId, $data) {
+            $rujukan = DB::table('rujukan')->where('id', $rujukanId)->lockForUpdate()->first();
+            abort_if(! $rujukan, 404);
+            $balita = $this->rowOrFail('balita', $rujukan->balita_id);
+            $this->checkPosyanduAccess($request, (int) $balita->posyandu_id);
+            abort_if($rujukan->status_rujukan !== 'menunggu_validasi', 422, 'Rujukan ini sudah ditindaklanjuti.');
 
-        DB::table('rujukan')->where('id', $rujukanId)->update($this->touch([
-            'status_rujukan' => $data['keputusan'] === 'cek_ulang_data' ? 'perlu_cek_ulang' : 'divalidasi',
-        ]));
+            $id = DB::table('validasi_medis')->insertGetId($this->withTimestamps([
+                'rujukan_id' => $rujukanId,
+                'bidan_id' => $request->user()->id,
+                'keputusan' => $data['keputusan'],
+                'catatan_bidan' => $data['catatan_bidan'],
+                'tanggal_validasi' => now()->toDateString(),
+            ]));
+
+            DB::table('rujukan')->where('id', $rujukanId)->update($this->touch([
+                'status_rujukan' => $data['keputusan'] === 'cek_ulang_data' ? 'perlu_cek_ulang' : 'divalidasi',
+            ]));
+
+            return [$id, $rujukan];
+        });
 
         $pengukuran = $this->row('pengukuran', $rujukan->pengukuran_id);
         if ($pengukuran) {
@@ -584,17 +644,23 @@ class ApiController extends Controller
             'keterangan' => ['nullable', 'string'],
         ]);
 
-        $balita = $this->rowOrFail('balita', $data['balita_id']);
-        if ($request->user()->role === 'bidan' && $request->user()->posyandu_id) {
-            abort_if($balita->posyandu_id !== $request->user()->posyandu_id, 403, 'Akses ditolak.');
-        }
-
         $validation = $this->row('validasi_medis', $data['validasi_medis_id']);
+        $rujukan = $validation ? $this->row('rujukan', $validation->rujukan_id) : null;
+        abort_if(! $validation || ! $rujukan, 404);
+        abort_if((int) $rujukan->balita_id !== (int) $data['balita_id'], 422, 'Validasi medis tidak sesuai dengan balita yang dipilih.');
+        $balita = $this->rowOrFail('balita', $rujukan->balita_id);
+        $this->checkPosyanduAccess($request, (int) $balita->posyandu_id);
         if ($validation->keputusan !== 'pmt') {
             return response()->json(['message' => 'Distribusi hanya dapat dibuat dari validasi medis yang membutuhkan PMT.'], 422);
         }
 
         $id = DB::transaction(function () use ($request, $data) {
+            DB::table('validasi_medis')->where('id', $data['validasi_medis_id'])->lockForUpdate()->first();
+            abort_if(
+                DB::table('distribusi_pmt')->where('validasi_medis_id', $data['validasi_medis_id'])->exists(),
+                422,
+                'PMT untuk validasi ini sudah didistribusikan.'
+            );
             $pmt = DB::table('katalog_pmt')->where('id', $data['pmt_id'])->lockForUpdate()->first();
             if (! $pmt || $pmt->stok_saat_ini < $data['jumlah']) {
                 abort(422, 'Stok tidak cukup untuk jumlah ini.');
@@ -660,10 +726,11 @@ class ApiController extends Controller
 
         $user = $request->user('sanctum');
 
+        $properties = $this->sanitizeAnalyticsProperties($data['properties'] ?? []);
         $id = DB::table('analytics_events')->insertGetId([
             'user_id' => $user ? $user->id : null,
             'event_name' => $data['event_name'],
-            'properties' => isset($data['properties']) ? json_encode($data['properties']) : null,
+            'properties' => $properties === [] ? null : json_encode($properties),
             'created_at' => now(),
         ]);
 
@@ -702,10 +769,12 @@ class ApiController extends Controller
 
         $filename = 'laporan-'.$type.'-'.now()->format('YmdHis').'.pdf';
 
+        $posyanduId = $request->user()->role === 'admin' ? null : (int) $request->user()->posyandu_id;
+
         if ($type === 'semua') {
-            [$predCols, $predRows] = $this->reportData('prediksi', $request->query('start_date'), $request->query('end_date'));
-            [$kehCols, $kehRows] = $this->reportData('kehadiran', $request->query('start_date'), $request->query('end_date'));
-            [$pmtCols, $pmtRows] = $this->reportData('distribusi-pmt', $request->query('start_date'), $request->query('end_date'));
+            [$predCols, $predRows] = $this->reportData('prediksi', $request->query('start_date'), $request->query('end_date'), $posyanduId);
+            [$kehCols, $kehRows] = $this->reportData('kehadiran', $request->query('start_date'), $request->query('end_date'), $posyanduId);
+            [$pmtCols, $pmtRows] = $this->reportData('distribusi-pmt', $request->query('start_date'), $request->query('end_date'), $posyanduId);
 
             $pdf = Pdf::loadHTML(view('reports.semua', [
                 'start' => $request->query('start_date', '-'),
@@ -721,7 +790,7 @@ class ApiController extends Controller
                 'distribusi-pmt' => 'Laporan Distribusi PMT',
             ];
 
-            [$columns, $rows] = $this->reportData($type, $request->query('start_date'), $request->query('end_date'));
+            [$columns, $rows] = $this->reportData($type, $request->query('start_date'), $request->query('end_date'), $posyanduId);
             $pdf = Pdf::loadHTML(view('reports.basic', [
                 'title' => $titles[$type],
                 'start' => $request->query('start_date', '-'),
@@ -736,7 +805,7 @@ class ApiController extends Controller
             ->header('Content-Disposition', 'inline; filename="'.$filename.'"');
     }
 
-    private function reportData(string $type, ?string $start, ?string $end): array
+    private function reportData(string $type, ?string $start, ?string $end, ?int $posyanduId = null): array
     {
         $startDate = $start ?: '1900-01-01';
         $endDate = $end ?: now()->toDateString();
@@ -746,6 +815,7 @@ class ApiController extends Controller
                 ->join('pengukuran', 'pengukuran.id', '=', 'hasil_prediksi.pengukuran_id')
                 ->join('balita', 'balita.id', '=', 'pengukuran.balita_id')
                 ->whereBetween('pengukuran.tanggal_ukur', [$startDate, $endDate])
+                ->when($posyanduId, fn ($query) => $query->where('balita.posyandu_id', $posyanduId))
                 ->orderByDesc('pengukuran.tanggal_ukur')
                 ->limit(200)
                 ->get(['pengukuran.tanggal_ukur', 'balita.nama_balita', 'balita.nama_ibu', 'hasil_prediksi.risk_level', 'hasil_prediksi.risk_score'])
@@ -765,6 +835,7 @@ class ApiController extends Controller
                 ->join('sesi_posyandu', 'sesi_posyandu.id', '=', 'pengukuran.sesi_posyandu_id')
                 ->join('balita', 'balita.id', '=', 'pengukuran.balita_id')
                 ->whereBetween('pengukuran.tanggal_ukur', [$startDate, $endDate])
+                ->when($posyanduId, fn ($query) => $query->where('balita.posyandu_id', $posyanduId))
                 ->orderByDesc('pengukuran.tanggal_ukur')
                 ->limit(200)
                 ->get(['sesi_posyandu.tanggal', 'balita.nama_balita', 'balita.nama_ibu', 'pengukuran.berat_badan', 'pengukuran.tinggi_badan'])
@@ -783,6 +854,7 @@ class ApiController extends Controller
             ->join('balita', 'balita.id', '=', 'distribusi_pmt.balita_id')
             ->join('katalog_pmt', 'katalog_pmt.id', '=', 'distribusi_pmt.pmt_id')
             ->whereBetween('distribusi_pmt.tanggal_distribusi', [$startDate, $endDate])
+            ->when($posyanduId, fn ($query) => $query->where('balita.posyandu_id', $posyanduId))
             ->orderByDesc('distribusi_pmt.tanggal_distribusi')
             ->limit(200)
             ->get(['distribusi_pmt.tanggal_distribusi', 'balita.nama_balita', 'katalog_pmt.nama_barang', 'distribusi_pmt.jumlah', 'katalog_pmt.satuan'])
@@ -837,7 +909,7 @@ class ApiController extends Controller
                 'risk_level' => $riskLevel,
                 'risk_score' => $probability ? max($probability) : null,
                 'probability_json' => json_encode($probability),
-                'model_version' => $body['model_version'] ?? 'xgboost_v1',
+                'model_version' => $body['model_version'] ?? 'random_forest_v1',
             ]));
 
             DB::table('pengukuran')->where('id', $pengukuranId)->update($this->touch(['status_prediksi' => 'selesai']));
@@ -1003,6 +1075,33 @@ class ApiController extends Controller
             return;
         }
         abort_if($balita->posyandu_id !== $request->user()->posyandu_id, 403, 'Akses ditolak.');
+    }
+
+    private function checkPosyanduAccess(Request $request, int $posyanduId): void
+    {
+        if ($request->user()->role === 'admin') {
+            return;
+        }
+
+        abort_if((int) $request->user()->posyandu_id !== $posyanduId, 403, 'Akses ditolak.');
+    }
+
+    private function sanitizeAnalyticsProperties(array $properties): array
+    {
+        $sensitiveKeys = ['nik', 'nik_nip', 'nik_balita', 'nik_ibu', 'nip', 'password', 'kata_sandi', 'token', 'fcm_token'];
+
+        foreach ($properties as $key => $value) {
+            if (in_array(strtolower((string) $key), $sensitiveKeys, true)) {
+                unset($properties[$key]);
+                continue;
+            }
+
+            if (is_array($value)) {
+                $properties[$key] = $this->sanitizeAnalyticsProperties($value);
+            }
+        }
+
+        return $properties;
     }
 
     private function requireBidanOrAdmin(Request $request): ?JsonResponse

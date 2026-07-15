@@ -3,7 +3,7 @@
 Repo ini berisi sisi server untuk MVP aplikasi Posyandu ML sesuai PRD:
 
 - `backend/` Laravel REST API untuk auth, balita, sesi Posyandu, pengukuran, skrining, rujukan, validasi bidan, PMT, notifikasi, dan laporan PDF.
-- `ml-api/` Flask service untuk prediksi model XGBoost melalui endpoint internal.
+- `ml-api/` Flask service untuk prediksi model Random Forest melalui endpoint internal.
 - `docs/design/` dokumen UI/UX Ledger Posyandu sebagai acuan implementasi mobile.
 
 Flutter tidak ada di repo ini. Aplikasi mobile memanggil Laravel, dan Laravel memanggil Flask secara internal. Untuk VPS, gunakan `ML_API_URL=http://127.0.0.1:5000` agar Flask tidak perlu diekspos publik.
@@ -36,7 +36,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe app.py
 ```
 
-Model default adalah `ml-api/stunting_model.json`. File `.pkl` tetap disimpan sebagai fallback sesuai kebutuhan demo.
+Model runtime adalah `ml-api/stunting_model.pkl` dengan versi `random_forest_v1`. File JSON lama tidak digunakan oleh service prediksi.
 
 Cek service ML setelah berjalan:
 

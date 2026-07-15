@@ -4,8 +4,8 @@ use App\Http\Controllers\ApiController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/login', [ApiController::class, 'login']);
-Route::post('/analytics', [ApiController::class, 'storeAnalytics']);
+Route::post('/login', [ApiController::class, 'login'])->middleware('throttle:10,1');
+Route::post('/analytics', [ApiController::class, 'storeAnalytics'])->middleware('throttle:30,1');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [ApiController::class, 'logout']);
@@ -33,7 +33,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/pengukuran', [ApiController::class, 'storePengukuran']);
     Route::get('/sesi/{id}/skrining', [ApiController::class, 'skrining']);
-    Route::post('/pengukuran/{id}/retry-prediksi', [ApiController::class, 'retryPrediksi']);
+    Route::post('/pengukuran/{id}/retry-prediksi', [ApiController::class, 'retryPrediksi'])->middleware('throttle:6,1');
 
     Route::get('/rujukan', [ApiController::class, 'listRujukan']);
     Route::get('/rujukan/{id}', [ApiController::class, 'showRujukan']);

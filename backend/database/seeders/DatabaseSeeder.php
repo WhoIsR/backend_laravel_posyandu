@@ -211,7 +211,7 @@ class DatabaseSeeder extends Seeder
                     'risk_level' => $risk,
                     'risk_score' => $risk === 'rendah' ? 0.18 : ($risk === 'sedang' ? 0.62 : 0.78),
                     'probability_json' => json_encode($this->probability($risk)),
-                    'model_version' => 'xgboost_v1',
+                    'model_version' => 'random_forest_v1',
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);

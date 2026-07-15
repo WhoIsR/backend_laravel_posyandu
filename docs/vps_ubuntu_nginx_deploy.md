@@ -123,7 +123,7 @@ curl http://127.0.0.1:5000/health
 ```
 
 Response harus berisi `status=ok` dan `model_loaded=true`.
-Template service memakai 1 Gunicorn worker agar model XGBoost tidak diload berkali-kali di VPS RAM kecil. Jika VPS sudah lebih besar, worker bisa dinaikkan setelah diuji ulang dengan `free -h` dan smoke test prediksi.
+Template service memakai 1 Gunicorn worker agar model Random Forest tidak diload berkali-kali di VPS RAM kecil. Jika VPS sudah lebih besar, worker bisa dinaikkan setelah diuji ulang dengan `free -h` dan smoke test prediksi.
 
 ## 6. Setup Nginx
 

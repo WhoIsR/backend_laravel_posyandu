@@ -468,7 +468,7 @@ Kader Bu Rini
 
 Skrining awal
 [Perlu perhatian]
-Model xgboost_v1
+Model random_forest_v1
 Probabilitas: rendah 0.18 | sedang 0.62 | tinggi 0.20
 
 Catatan komunikasi

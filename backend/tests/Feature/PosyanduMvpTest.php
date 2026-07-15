@@ -230,7 +230,7 @@ class PosyanduMvpTest extends TestCase
                     'sedang' => 0.62,
                     'tinggi' => 0.20,
                 ],
-                'model_version' => 'xgboost_v1',
+                'model_version' => 'random_forest_v1',
             ], 200),
         ]);
 
@@ -288,7 +288,7 @@ class PosyanduMvpTest extends TestCase
                 'predicted_class' => 0,
                 'risk_level' => 'rendah',
                 'probability' => ['rendah' => 0.91, 'sedang' => 0.06, 'tinggi' => 0.03],
-                'model_version' => 'xgboost_v1',
+                'model_version' => 'random_forest_v1',
             ]),
         ]);
 
@@ -349,7 +349,7 @@ class PosyanduMvpTest extends TestCase
                     'predicted_class' => 0,
                     'risk_level' => 'rendah',
                     'probability' => ['rendah' => 0.82, 'sedang' => 0.13, 'tinggi' => 0.05],
-                    'model_version' => 'xgboost_v1',
+                    'model_version' => 'random_forest_v1',
                 ], 200),
         ]);
 
@@ -670,7 +670,7 @@ class PosyanduMvpTest extends TestCase
             'risk_level' => $riskLevel,
             'risk_score' => 0.72,
             'probability_json' => json_encode(['rendah' => 0.1, 'sedang' => 0.18, 'tinggi' => 0.72]),
-            'model_version' => 'xgboost_v1',
+            'model_version' => 'random_forest_v1',
             'created_at' => now(),
             'updated_at' => now(),
         ]);

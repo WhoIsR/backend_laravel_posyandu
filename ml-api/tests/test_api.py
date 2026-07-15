@@ -18,7 +18,7 @@ class MlApiTest(unittest.TestCase):
         pickle.dump(DummyModel(), self.tmp)
         self.tmp.close()
         os.environ["MODEL_PATH"] = self.tmp.name
-        os.environ["MODEL_VERSION"] = "xgboost_v1"
+        os.environ["MODEL_VERSION"] = "random_forest_v1"
 
         from app import create_app
 
@@ -51,7 +51,7 @@ class MlApiTest(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["predicted_class"], 1)
         self.assertEqual(payload["risk_level"], "sedang")
-        self.assertEqual(payload["model_version"], "xgboost_v1")
+        self.assertEqual(payload["model_version"], "random_forest_v1")
         self.assertEqual(set(payload["probability"].keys()), {"rendah", "sedang", "tinggi"})
 
     def test_predict_rejects_missing_feature(self):
